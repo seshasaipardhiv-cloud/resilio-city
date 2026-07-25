@@ -1,16 +1,16 @@
 services:
-  # ── Backend: FastAPI ──────────────────────────────────────────────
+  # ── Backend: TypeScript Standalone REST Server ───────────────────
   - type: web
     name: resilio-city-api
-    runtime: python
+    runtime: node
     region: singapore
     plan: free
-    rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    rootDir: backend-ts
+    buildCommand: npm install && npm run build
+    startCommand: npm start
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
+      - key: NODE_VERSION
+        value: 20.0.0
 
   # ── Frontend: React Static Site ───────────────────────────────────
   - type: web
@@ -26,7 +26,7 @@ services:
         fromService:
           name: resilio-city-api
           type: web
-          property: host
+          property: url
     headers:
       - path: /*
         name: Cache-Control

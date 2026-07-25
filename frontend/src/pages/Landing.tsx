@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import bgRoad from '../assets/bg_road.jpg';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface CityCard {
   id: string; name: string; subtitle: string; emoji: string; theme: string;
@@ -29,6 +30,7 @@ export default function Landing({ onSelectCity }: Props) {
   const [cities, setCities] = useState<CityCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingCity, setLoadingCity] = useState<string | null>(null);
+  const [loadingStage, setLoadingStage] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -39,9 +41,14 @@ export default function Landing({ onSelectCity }: Props) {
 
   const handleSelect = async (city: CityCard) => {
     setLoadingCity(city.id);
+    setLoadingStage('Initializing city engine...');
     try {
+      setTimeout(() => setLoadingStage('Loading road network...'), 300);
+      setTimeout(() => setLoadingStage('Applying graph analysis...'), 900);
+      setTimeout(() => setLoadingStage('Calibrating resilience metrics...'), 1500);
       await axios.get(`${API}/cities/${city.id}/load`);
-      onSelectCity(city.id, city.name);
+      setLoadingStage('Rendering 3D map...');
+      setTimeout(() => onSelectCity(city.id, city.name), 300);
     } catch {
       setError(`Failed to load ${city.name}`);
       setLoadingCity(null);
@@ -59,9 +66,48 @@ export default function Landing({ onSelectCity }: Props) {
   const totalCritical = cities.reduce((a, c) => a + c.critical_roads, 0);
   const totalPop = cities.reduce((a, c) => a + c.population_covered, 0);
   const avgRci = cities.length ? (cities.reduce((a, c) => a + c.avg_rci, 0) / cities.length) : 0;
+  const loadingCityObj = cities.find(c => c.id === loadingCity);
 
   return (
-    <div style={{ position: 'relative', zIndex: 2, width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{
+      position: 'relative', zIndex: 2, width: '100vw', height: '100vh',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      backgroundImage: `url(${bgRoad})`,
+      backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed',
+    }}>
+      {/* Dark overlay */}
+      <div style={{
+        position: 'absolute', inset: 0, zIndex: 0,
+        background: 'linear-gradient(180deg, rgba(3,6,16,0.85) 0%, rgba(5,10,22,0.75) 40%, rgba(3,6,16,0.90) 100%)',
+      }} />
+
+      {/* ── FULL-SCREEN CITY LOADING OVERLAY ── */}
+      {loadingCity && (
+        <div className="city-loading-overlay">
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 16 }}>{loadingCityObj?.emoji ?? '🏙️'}</div>
+            <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 22, color: loadingCityObj?.theme ?? 'var(--cyan)', marginBottom: 6 }}>
+              {loadingCityObj?.name ?? 'Loading city...'}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 24, letterSpacing: 1 }}>{loadingCityObj?.subtitle}</div>
+          </div>
+          <div className="city-loading-spinner" style={{ borderTopColor: loadingCityObj?.theme ?? 'var(--cyan)' }} />
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', letterSpacing: 1 }}>{loadingStage}</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            {['Initializing', 'Roads', 'Analysis', 'Rendering'].map((s, i) => (
+              <div key={s} style={{
+                width: 6, height: 6, borderRadius: '50%',
+                background: loadingStage.toLowerCase().includes(s.toLowerCase()) ? (loadingCityObj?.theme ?? 'var(--cyan)') : 'rgba(255,255,255,0.15)',
+                transition: 'background 0.3s ease',
+                boxShadow: loadingStage.toLowerCase().includes(s.toLowerCase()) ? `0 0 8px ${loadingCityObj?.theme ?? 'var(--cyan)'}` : 'none',
+              }} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Content wrapper — sits above overlay */}
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 
       {/* ── HEADER ── */}
       <div style={{ padding: '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -224,6 +270,9 @@ export default function Landing({ onSelectCity }: Props) {
           <span>🧠 OR-Tools: Ready</span>
         </div>
       </div>
+      {/* ── FOOTER end ── */}
     </div>
+    {/* ── content wrapper end ── */}
+  </div>
   );
 }

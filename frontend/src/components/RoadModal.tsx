@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import axios from 'axios';
+
+const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 /* ══════════════════════════════════════════════════════════════════
    3D ROAD SIMULATION MODAL
@@ -7,12 +10,13 @@ import { useEffect, useRef, useState } from 'react';
    2. Depth layer breakdown
    3. Top-down aerial with critical points
    4. Elevation profile
+   5. Emergency Services ETA panel
 ══════════════════════════════════════════════════════════════════ */
 
 interface RoadProps { properties: Record<string, any>; }
-interface Props { road: RoadProps; onClose: () => void; }
+interface Props { road: RoadProps; cityId: string; onClose: () => void; }
 
-type ViewMode = 'stations' | 'crosssection' | 'aerial' | 'elevation';
+type ViewMode = 'stations' | 'crosssection' | 'aerial' | 'elevation' | 'emergency';
 
 // ── Canvas helpers ─────────────────────────────────────────────────────────────
 const C = (v: number) => Math.round(v);
@@ -456,13 +460,27 @@ function drawElevation(
   ctx.textAlign = 'left';
 }
 
-// ── Main Modal Component ───────────────────────────────────────────────────────
-export default function RoadModal({ road, onClose }: Props) {
+// ── Main Modal Component ───────────────────────────────────────────────────────────────────────
+export default function RoadModal({ road, cityId, onClose }: Props) {
   const p = road.properties;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const phaseRef = useRef<number>(0);
   const [view, setView] = useState<ViewMode>('stations');
+  const [emergencyData, setEmergencyData] = useState<any>(null);
+  const [emergencyLoading, setEmergencyLoading] = useState(false);
+
+  // Fetch nearest emergency services when emergency tab is opened
+  useEffect(() => {
+    if (view === 'emergency' && !emergencyData && p.id) {
+      setEmergencyLoading(true);
+      axios.get(`${API}/city/road/${p.id}/emergency`)
+        .then(r => setEmergencyData(r.data))
+        .catch(() => setEmergencyData({ error: true }))
+        .finally(() => setEmergencyLoading(false));
+    }
+  }, [view, p.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // Build critical points deterministically from road data
   const hasCritical = p.damage_type && p.damage_type !== 'none';
@@ -546,12 +564,14 @@ export default function RoadModal({ road, onClose }: Props) {
   const dmgCol = DAMAGE_COLORS[p.damage_type ?? 'none'] ?? '#00ff9d';
 
   const views: { id: ViewMode; label: string; icon: string }[] = [
-    { id: 'stations',     label: 'Station Views',   icon: '🏗️' },
-    { id: 'crosssection', label: 'Cross-Section',   icon: '📐' },
-    { id: 'aerial',       label: 'Aerial Plan',     icon: '🛰️' },
+    { id: 'stations',     label: 'Station Views',     icon: '🏗️' },
+    { id: 'crosssection', label: 'Cross-Section',     icon: '📐' },
+    { id: 'aerial',       label: 'Aerial Plan',       icon: '🛰️' },
     { id: 'elevation',    label: 'Elevation Profile', icon: '📈' },
+    { id: 'emergency',    label: 'Emergency ETA',     icon: '🚨' },
   ];
 
+  // ── skip canvas loop for non-canvas views ──
   return (
     <div className="modal-wrap" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="glass-lg modal-box">
@@ -724,15 +744,14 @@ export default function RoadModal({ road, onClose }: Props) {
               ))}
             </div>
 
-            {/* Canvas */}
-            <div style={{ flex: 1, background: '#070c16', position: 'relative', overflow: 'hidden' }}>
+            {/* Canvas — hidden when on Emergency tab */}
+            <div style={{ flex: 1, background: '#070c16', position: 'relative', overflow: 'hidden', display: view === 'emergency' ? 'none' : 'block' }}>
               <canvas
                 ref={canvasRef}
                 width={900}
                 height={600}
                 style={{ width: '100%', height: '100%', display: 'block' }}
               />
-
               {/* Overlay corner labels */}
               <div style={{ position: 'absolute', bottom: 12, right: 12, fontSize: 10, color: 'rgba(0,212,255,0.4)', fontFamily: 'var(--font-mono)', textAlign: 'right' }}>
                 <div>RESILIO CITY — AI Road Simulation Engine</div>
@@ -747,6 +766,114 @@ export default function RoadModal({ road, onClose }: Props) {
                 </div>
               )}
             </div>
+
+            {/* ── EMERGENCY ETA PANEL ── */}
+            {view === 'emergency' && (
+              <div style={{ flex: 1, background: '#070c16', overflowY: 'auto', padding: '20px 24px' }}>
+                <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 16, color: 'var(--red)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  🚨 Emergency Services — Nearest Response Units
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 20 }}>
+                  Road: <b style={{ color: 'var(--text)' }}>{p.road_name ?? p.name ?? 'Unknown'}</b>
+                  &nbsp;·&nbsp; All ETAs include 20% traffic overhead
+                </div>
+
+                {emergencyLoading && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'var(--text-dim)', padding: '40px 0' }}>
+                    <div className="spinner" /> <span>Calculating nearest emergency services...</span>
+                  </div>
+                )}
+
+                {!emergencyLoading && emergencyData?.error && (
+                  <div style={{ color: 'var(--red)', padding: '20px', textAlign: 'center' }}>
+                    ⚠ Could not fetch emergency data. Ensure the backend is running.
+                  </div>
+                )}
+
+                {!emergencyLoading && emergencyData?.nearest_services && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {emergencyData.nearest_services.map((svc: any, i: number) => {
+                      const isNearest = i === 0;
+                      const typeColors: Record<string,string> = {
+                        hospital: '#ff4444', fire_station: '#ff8800', police: '#4488ff'
+                      };
+                      const col = typeColors[svc.type] ?? '#ffffff';
+                      const etaUrgency = svc.eta_minutes < 5 ? 'var(--green)' : svc.eta_minutes < 12 ? 'var(--yellow)' : 'var(--red)';
+                      return (
+                        <div key={svc.id} style={{
+                          background: isNearest ? `${col}12` : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${isNearest ? col + '50' : 'rgba(255,255,255,0.08)'}`,
+                          borderRadius: 12, padding: '14px 18px',
+                          boxShadow: isNearest ? `0 0 24px ${col}20` : 'none',
+                          transition: 'all 0.2s ease',
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                            <div>
+                              {isNearest && (
+                                <div style={{ fontSize: 10, color: col, fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>
+                                  ★ NEAREST UNIT
+                                </div>
+                              )}
+                              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 14, color: 'var(--text)', marginBottom: 2 }}>
+                                {svc.label} — {svc.name}
+                              </div>
+                              <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                                {svc.distance_km} km away · travelling at {svc.speed_kmh} km/h
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 26, color: etaUrgency, lineHeight: 1 }}>
+                                {svc.eta_minutes} <span style={{ fontSize: 12, fontWeight: 600 }}>min</span>
+                              </div>
+                              <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>ETA</div>
+                            </div>
+                          </div>
+                          {/* ETA progress bar */}
+                          <div className="progress-bar">
+                            <div className="progress-fill" style={{
+                              width: `${Math.min(100, (svc.eta_minutes / 30) * 100)}%`,
+                              background: etaUrgency,
+                            }} />
+                          </div>
+                          {svc.type === 'hospital' && svc.ambulances && (
+                            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 8 }}>
+                              🏥 Capacity: {svc.capacity?.toLocaleString()} beds · {svc.ambulances} ambulances available
+                            </div>
+                          )}
+                          {svc.type === 'fire_station' && (
+                            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 8 }}>
+                              🚒 {svc.trucks} fire trucks · {svc.personnel} personnel on duty
+                            </div>
+                          )}
+                          {svc.type === 'police' && (
+                            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 8 }}>
+                              🚔 {svc.vehicles} patrol vehicles · {svc.personnel} officers
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Summary row */}
+                    <div style={{ marginTop: 8, background: 'rgba(0,212,255,0.06)', border: '1px solid rgba(0,212,255,0.2)', borderRadius: 10, padding: '12px 18px' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--cyan)', marginBottom: 8 }}>📊 Response Summary</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                        {[
+                          { label: 'Ambulance ETA', val: emergencyData.nearest_services.find((s:any)=>s.type==='hospital')?.eta_minutes + ' min', col: '#ff4444' },
+                          { label: 'Fire Unit ETA', val: emergencyData.nearest_services.find((s:any)=>s.type==='fire_station')?.eta_minutes + ' min', col: '#ff8800' },
+                          { label: 'Police ETA',    val: emergencyData.nearest_services.find((s:any)=>s.type==='police')?.eta_minutes + ' min',    col: '#4488ff' },
+                        ].map(r => (
+                          <div key={r.label} style={{ textAlign: 'center', background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '8px' }}>
+                            <div style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>{r.label}</div>
+                            <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 18, color: r.col }}>{r.val}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
