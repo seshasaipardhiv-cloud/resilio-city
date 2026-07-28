@@ -212,7 +212,7 @@ app.get('/city', (_req: Request, res: Response): void => {
     return {
       type: 'Feature',
       geometry: { type: 'LineString', coordinates: [[u.lon, u.lat], [v.lon, v.lat]] },
-      properties: { ...edge, city_id: activeCity!.city_id, satellite_telemetry: activeCity!.satellite_telemetry },
+      properties: { ...edge, city_id: activeCity!.city_id },
     };
   }).filter(Boolean);
   res.json({ type: 'FeatureCollection', features, satellite_telemetry: activeCity.satellite_telemetry });

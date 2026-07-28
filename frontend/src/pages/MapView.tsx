@@ -134,11 +134,11 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   };
 
   const edges = geoData?.features ?? [];
-  const failingCount = edges.filter((f: any) => (f.properties?.failure_probability ?? 0) > 0.7).length;
+  const failingCount = useMemo(() => edges.filter((f: any) => (f.properties?.failure_probability ?? 0) > 0.7).length, [edges]);
   const avgRci  = analysis?.average_rci   ?? 0;
   const avgCrit = analysis?.average_criticality ?? 0;
 
-  const getEdgeColor = (f: any): [number,number,number,number] => {
+  const getEdgeColor = useCallback((f: any): [number,number,number,number] => {
     if (activeEventIdx !== null) {
       const fp = f.properties?.failure_probability ?? 0;
       if (fp > 0.7) return [255, 30, 80, 255];
@@ -146,45 +146,47 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       return [60, 60, 80, 50];
     }
     return rciColor(f.properties?.rci ?? 70, f.properties?.failure_probability ?? 0);
-  };
+  }, [activeEventIdx]);
 
-  const rciHist = [0, 20, 40, 60, 80].map(b => ({
+  const rciHist = useMemo(() => [0, 20, 40, 60, 80].map(b => ({
     range: `${b}–${b+20}`,
     count: edges.filter((f: any) => { const r = f.properties?.rci ?? 0; return r >= b && r < b + 20; }).length,
-  }));
+  })), [edges]);
   const simChart = simHistory.length ? simHistory : [{ t: 'Pre', GCC: 100, Reach: 100 }];
 
-  // ── Generate Potholes ──────────────────────────────────────────────────────
+  // ── Generate Potholes (Memoized solely on edges to avoid repeating on interval) ──
   const potholes = useMemo(() => {
     if (!edges.length) return [];
     const pts: any[] = [];
-    // Use satUpdate to slightly jitter or add potholes dynamically
-    let seed = satUpdate; 
     edges.forEach((f: any) => {
       if ((f.properties?.failure_probability ?? 0) > 0.4) {
-        const sc = f.geometry.coordinates;
-        for (let i=0; i < 3; i++) {
-          const t = Math.random();
-          const src = sc[0], tgt = sc[sc.length-1];
-          pts.push({
-            pos: [
-              src[0] + (tgt[0]-src[0])*t + (Math.random()-0.5)*0.0003, 
-              src[1] + (tgt[1]-src[1])*t + (Math.random()-0.5)*0.0003
-            ],
-            size: 1 + Math.random() * 2.5
-          });
+        const sc = f.geometry?.coordinates;
+        if (sc && sc.length >= 2) {
+          for (let i=0; i < 2; i++) {
+            const t = Math.random();
+            const src = sc[0], tgt = sc[sc.length-1];
+            pts.push({
+              pos: [
+                src[0] + (tgt[0]-src[0])*t + (Math.random()-0.5)*0.0003, 
+                src[1] + (tgt[1]-src[1])*t + (Math.random()-0.5)*0.0003
+              ],
+              size: 1.5
+            });
+          }
         }
       }
     });
     return pts;
-  }, [edges, satUpdate]);
+  }, [edges]);
 
-  // ── DeckGL Layers ──────────────────────────────────────────────────────────
-  const layers = (() => {
+  // ── Memoized Heavy Base Road Layers (Prevents re-filtering 35,000+ roads at 60 FPS!) ──
+  const baseRoadLayers = useMemo(() => {
     if (!edges.length) return [];
     const selectedId = selectedRoad?.properties?.id;
+    const unselectedRoads = edges.filter((f: any) => f.properties?.id !== selectedId);
+    const criticalRoads = edges.filter((f: any) => (f.properties?.failure_probability ?? 0) > 0.7);
 
-    const baseLayers: any[] = [
+    return [
       // Glow behind all roads
       new LineLayer({
         id: 'glow',
@@ -193,11 +195,12 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         getTargetPosition: (f: any) => f.geometry.coordinates[1],
         getColor: (f: any) => { const c = getEdgeColor(f); return [c[0], c[1], c[2], 18]; },
         getWidth: 14, widthUnits: 'pixels', pickable: false,
+        updateTriggers: { getColor: [activeEventIdx] },
       }),
       // Main road lines
       new LineLayer({
         id: 'roads',
-        data: edges.filter((f: any) => f.properties?.id !== selectedId),
+        data: unselectedRoads,
         getSourcePosition: (f: any) => f.geometry.coordinates[0],
         getTargetPosition: (f: any) => f.geometry.coordinates[1],
         getColor: (f: any) => getEdgeColor(f),
@@ -213,7 +216,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       // Critical failure nodes
       new ScatterplotLayer({
         id: 'critical-nodes',
-        data: edges.filter((f: any) => (f.properties?.failure_probability ?? 0) > 0.7),
+        data: criticalRoads,
         getPosition: (f: any) => f.geometry.coordinates[0],
         getRadius: 5, radiusUnits: 'pixels',
         getFillColor: [255, 59, 107, 230],
@@ -230,16 +233,21 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         getLineColor: [0, 0, 0, 150],
         stroked: true,
         pickable: false,
-        updateTriggers: { getPosition: [satUpdate] },
       }),
     ];
+  }, [edges, selectedRoad?.properties?.id, activeEventIdx, potholes, getEdgeColor]);
+
+  // ── DeckGL Combined Layers (Fast lightweight updates for selected road flow) ──
+  const layers = useMemo(() => {
+    if (!edges.length) return [];
+    const combined: any[] = [...baseRoadLayers];
 
     // ── DOTTED ANIMATED SELECTED ROAD ───────────────────────────────────────
     if (selectedRoad) {
       const sc = selectedRoad.geometry?.coordinates;
       if (sc && sc.length >= 2) {
         // Outer glow halo
-        baseLayers.push(new LineLayer({
+        combined.push(new LineLayer({
           id: 'selected-halo',
           data: [selectedRoad],
           getSourcePosition: (f: any) => f.geometry.coordinates[0],
@@ -248,7 +256,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           getWidth: 28, widthUnits: 'pixels', pickable: false,
         }));
         // White base pulse
-        baseLayers.push(new LineLayer({
+        combined.push(new LineLayer({
           id: 'selected-base',
           data: [selectedRoad],
           getSourcePosition: (f: any) => f.geometry.coordinates[0],
@@ -256,21 +264,19 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           getColor: [255, 255, 255, 90],
           getWidth: 10, widthUnits: 'pixels', pickable: false,
         }));
-        // Animated dashed overlay (cyan)
-        // We simulate dashes by creating multiple short segments
+        // Animated dashed overlay (only calculates 40 short segments)
         const src = sc[0];
         const tgt = sc[sc.length - 1];
-        const totalLen = Math.sqrt(Math.pow(tgt[0]-src[0],2) + Math.pow(tgt[1]-src[1],2));
-        const segments = 40; // Denser, smoother flow
+        const segments = 40;
         const dashData = Array.from({ length: segments }).map((_, i) => {
           const dashFrac = (i + (dashOffset / 60)) / segments;
-          const gapFrac  = (i + (dashOffset / 60) + 0.6) / segments; // Longer dashes
+          const gapFrac  = (i + (dashOffset / 60) + 0.6) / segments;
           const s = [src[0] + (tgt[0]-src[0]) * (dashFrac % 1), src[1] + (tgt[1]-src[1]) * (dashFrac % 1)];
           const t = [src[0] + (tgt[0]-src[0]) * Math.min(1, gapFrac % 1 + 0.001), src[1] + (tgt[1]-src[1]) * Math.min(1, gapFrac % 1 + 0.001)];
           return { src: s, tgt: t };
         });
 
-        baseLayers.push(new LineLayer({
+        combined.push(new LineLayer({
           id: 'selected-flow',
           data: dashData,
           getSourcePosition: (d: any) => d.src,
@@ -283,8 +289,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           updateTriggers: { getColor: [dashOffset], getSourcePosition: [dashOffset] },
         }));
 
-        // Endpoint dot markers
-        baseLayers.push(new ScatterplotLayer({
+        combined.push(new ScatterplotLayer({
           id: 'selected-endpoints',
           data: [{ pos: sc[0] }, { pos: sc[sc.length-1] }],
           getPosition: (d: any) => d.pos,
@@ -299,7 +304,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
 
     // Emergency services
     if (showServices && emergencySvcs.length) {
-      baseLayers.push(new ScatterplotLayer({
+      combined.push(new ScatterplotLayer({
         id: 'emergency-svcs',
         data: emergencySvcs,
         getPosition: (d: any) => [d.lon, d.lat],
@@ -309,7 +314,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         lineWidthUnits: 'pixels', getLineWidth: 2,
         stroked: true, pickable: false,
       } as any) as any);
-      baseLayers.push(new ScatterplotLayer({
+      combined.push(new ScatterplotLayer({
         id: 'emergency-glow',
         data: emergencySvcs,
         getPosition: (d: any) => [d.lon, d.lat],
@@ -319,8 +324,8 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       } as any) as any);
     }
 
-    return baseLayers;
-  })();
+    return combined;
+  }, [baseRoadLayers, edges.length, selectedRoad, dashOffset, showServices, emergencySvcs]);
 
   // ── Intensity color helper ─────────────────────────────────────────────────
   const intensityColor = intensity >= 0.7 ? '#ff3b6b' : intensity >= 0.35 ? '#ffd93d' : '#00ff9d';
