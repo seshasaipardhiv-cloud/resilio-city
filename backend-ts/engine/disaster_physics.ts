@@ -75,35 +75,28 @@ export class DisasterPhysicsEngine {
       const riverCheck = DisasterPhysicsEngine.calculateRiverProximityMeters(latU, lonU);
       const isBridge = edge.is_bridge || edge.type === 'bridge_deck' || edge.type === 'flyover';
 
-      if (hazardType.toLowerCase().includes('flood') || hazardType.toLowerCase().includes('cyclonic') || hazardType.toLowerCase().includes('rain')) {
-        // Hydrological propagation following terrain slope, river proximity, and surface water runoff capacity
-        const riverProximitySurcharge = riverCheck.minDistanceMeters < 2500 ? (1.0 - (riverCheck.minDistanceMeters / 2500)) * 0.45 : 0.0;
-        const terrainDepressionIndex = Math.max(0.0, (300 - meanElevation) / 150);
-        const drainageCapacityCoefficient = edge.surface === 'concrete' && isBridge ? 1.5 : (edge.lanes >= 4 ? 1.2 : 0.75);
+      if (hazardType.toLowerCase().includes('flood') || hazardType.toLowerCase().includes('cyclon') || hazardType.toLowerCase().includes('rain')) {
+        const riverBonus = riverCheck.minDistanceMeters < 3500 ? (1.0 - (riverCheck.minDistanceMeters / 3500)) * 0.35 : 0.0;
+        const terrainDepressionIndex = Math.max(0.0, Math.min(1.0, (300 - meanElevation) / 180));
+        const vulnerabilityScore = normIntensity * 0.70 + riverBonus * 0.20 + terrainDepressionIndex * 0.15 - (edge.lanes >= 4 ? 0.08 : 0.0);
         
-        const hydraulicLoad = ((telemetry.rainfall_mm * 2.0) / 100.0) + (normIntensity * 0.75) + riverProximitySurcharge + (terrainDepressionIndex * 0.3);
-        const effectiveSubmergenceRisk = hydraulicLoad / drainageCapacityCoefficient;
-
-        if (effectiveSubmergenceRisk > 0.65 && !isBridge) {
+        // Threshold scales with superior intensity: low intensity only affects most vulnerable roads
+        if (vulnerabilityScore >= 0.42 + (1.0 - normIntensity) * 0.35 && !isBridge) {
           edge.damage_state = 'flooded';
           hazardTriggered = true;
           stats.arterials_submerged++;
-          edge.current_speed_kmh = Math.round(edge.speed_limit_kmh * 0.15);
+          edge.current_speed_kmh = Math.round(edge.speed_limit_kmh * 0.2);
           if (edge.satellite_observations) {
-            edge.satellite_observations.flood_water_depth_m = Math.round(effectiveSubmergenceRisk * 0.6 * 100) / 100;
+            edge.satellite_observations.flood_water_depth_m = Math.round(vulnerabilityScore * 0.8 * 100) / 100;
           }
         }
       } else if (hazardType.toLowerCase().includes('earthquake') || hazardType.toLowerCase().includes('seismic')) {
-        // Seismic failure depends on bridges, road age, surface material, live traffic load, and ground motion (PGA)
         const roadAgeYears = Math.max(1, 2026 - (edge.construction_year || 2012));
-        const fatigueDegradation = Math.min(0.35, roadAgeYears * 0.015);
-        const materialShearVulnerability = edge.surface === 'asphalt' ? 0.22 : (edge.surface === 'concrete' ? 0.30 : 0.15);
-        const liveTrafficStructuralLoad = Math.min(0.40, (edge.traffic_volume_vph / Math.max(1, edge.lanes * 1000)) * 0.35);
-        const bridgeAmplification = isBridge ? 1.45 : 1.0;
+        const fatigueDegradation = Math.min(0.25, roadAgeYears * 0.01);
+        const bridgeAmplification = isBridge ? 0.25 : 0.0;
+        const vulnerabilityScore = normIntensity * 0.70 + fatigueDegradation * 0.20 + bridgeAmplification + (pgaGroundMotion * 0.1);
 
-        const seismicStressRatio = (pgaGroundMotion * bridgeAmplification) + fatigueDegradation + materialShearVulnerability + liveTrafficStructuralLoad;
-
-        if (seismicStressRatio > 0.75) {
+        if (vulnerabilityScore >= 0.40 + (1.0 - normIntensity) * 0.35) {
           edge.damage_state = isBridge ? 'collapsed' : 'subsided';
           hazardTriggered = true;
           if (isBridge) stats.bridges_structurally_compromised++;
@@ -115,10 +108,10 @@ export class DisasterPhysicsEngine {
           }
         }
       } else {
-        // Landslide, subsidence, or industrial infrastructural failure
+        // Landslide, subsidence, heatwave, or industrial infrastructural failure
         const slopePct = Math.abs(elevationU - elevationV) / Math.max(15, edge.length_meters) * 100;
-        const instabilityScore = (slopePct / 20.0) + (Math.abs(telemetry.ground_subsidence_mm_yr) / 10.0) + normIntensity * 0.6;
-        if (instabilityScore > 0.70) {
+        const vulnerabilityScore = normIntensity * 0.75 + (slopePct / 30.0) * 0.25;
+        if (vulnerabilityScore >= 0.45 + (1.0 - normIntensity) * 0.35) {
           edge.damage_state = 'obstructed';
           hazardTriggered = true;
           edge.current_speed_kmh = 10;
@@ -127,9 +120,9 @@ export class DisasterPhysicsEngine {
 
       if (hazardTriggered) {
         affectedSet.add(edge.id);
-        const rciDrop = Math.round(edge.rci * 0.4 * normIntensity);
+        const rciDrop = Math.round(edge.rci * (0.35 + 0.4 * normIntensity));
         edge.rci = Math.max(5, edge.rci - rciDrop);
-        edge.failure_probability = Math.min(0.99, Math.round((edge.failure_probability + 0.45 * normIntensity) * 100) / 100);
+        edge.failure_probability = Math.min(0.99, Math.round((edge.failure_probability + 0.35 + 0.55 * normIntensity) * 100) / 100);
         totalRciLoss += rciDrop;
       }
     });
