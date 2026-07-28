@@ -4,8 +4,6 @@ from pydantic import BaseModel
 import logging
 import threading
 
-from engine.generator import generate_city
-from engine.cities import CITY_CONFIGS, generate_city_from_config, get_city_summary
 from engine.osm_loader import load_osm_city, get_osm_city_summary, CITY_OSM_CONFIG
 from engine.hazard import apply_hazard
 from engine.graph_intelligence import analyze_network
@@ -35,39 +33,27 @@ _cache_status: dict = {cid: "pending" for cid in CITY_OSM_CONFIG}  # pending | l
 
 
 def _preload_city(city_id: str):
-    """Background thread: fetch + cache one city."""
+    """Background thread: fetch + cache one authentic municipal OpenStreetMap city."""
     global _cache, _cache_status
     _cache_status[city_id] = "loading"
-    log.info(f"[PRE-CACHE] Starting {city_id}...")
+    log.info(f"[PRE-CACHE] Starting real OSM loading for {city_id}...")
     try:
         data = load_osm_city(city_id)
         data["edges"] = analyze_network(data["nodes"], data["edges"])
-        # Align emergency services to the real map nodes
         align_services_to_city_nodes(city_id, list(data["nodes"].values()))
         
         _cache[city_id] = data
         _cache_status[city_id] = "ready"
-        log.info(f"[PRE-CACHE] ✓ {city_id} ready — {len(data['edges'])} roads")
+        log.info(f"[PRE-CACHE] ✓ {city_id} ready — {len(data['edges'])} real road segments")
     except Exception as e:
-        log.warning(f"[PRE-CACHE] ✗ {city_id} OSM failed ({e}), using synthetic fallback")
-        try:
-            data = generate_city_from_config(city_id)
-            data["edges"] = analyze_network(data["nodes"], data["edges"])
-            # Align emergency services to synthetic map nodes
-            align_services_to_city_nodes(city_id, list(data["nodes"].values()))
-            
-            _cache[city_id] = data
-            _cache_status[city_id] = "ready"
-            log.info(f"[PRE-CACHE] ✓ {city_id} ready (synthetic) — {len(data['edges'])} roads")
-        except Exception as e2:
-            log.error(f"[PRE-CACHE] ✗✗ {city_id} total failure: {e2}")
-            _cache_status[city_id] = "error"
+        log.error(f"[PRE-CACHE] ✗ {city_id} OSM failed ({e}). Synthetic fallback generation is strictly forbidden.")
+        _cache_status[city_id] = "error"
 
 
 @app.on_event("startup")
 def startup_preload():
     """On server start, pre-cache all cities in parallel background threads."""
-    log.info("[STARTUP] Pre-loading all 5 cities in background...")
+    log.info("[STARTUP] Pre-loading all authentic municipal OSM networks in background...")
     for city_id in CITY_OSM_CONFIG:
         t = threading.Thread(target=_preload_city, args=(city_id,), daemon=True)
         t.start()
@@ -86,10 +72,10 @@ class DisasterRequest(BaseModel):
 # ─── Cities API ───────────────────────────────────────────────────────────────
 @app.get("/cities")
 def list_cities():
-    """Return summary cards for all pre-defined cities (for landing page)."""
+    """Return summary cards for all pre-defined municipal networks."""
     summaries = []
     for cid in CITY_OSM_CONFIG:
-        s = get_city_summary(cid) if cid in CITY_CONFIGS else get_osm_city_summary(cid)
+        s = get_osm_city_summary(cid)
         s["cache_status"] = _cache_status.get(cid, "pending")
         summaries.append(s)
     return summaries
@@ -102,43 +88,57 @@ def cache_status():
 
 
 @app.get("/cities/{city_id}/load")
+@app.get("/city/{city_id}/load")
 def load_city(city_id: str):
     """
-    Load a city — instantly from pre-cache if ready, otherwise generate on-demand.
+    Load a real municipal road network — instantly from pre-cache if ready. ZERO SYNTHETIC FALLBACKS.
     """
     global city_data
-    if city_id not in CITY_OSM_CONFIG and city_id not in CITY_CONFIGS:
+    if city_id not in CITY_OSM_CONFIG:
         raise HTTPException(status_code=404, detail=f"City '{city_id}' not found.")
 
     status = _cache_status.get(city_id, "pending")
 
     if status == "ready" and city_id in _cache:
-        # ✅ INSTANT — serve from pre-cache
         city_data = _cache[city_id]
-        source = "OpenStreetMap (cached — instant)"
-        log.info(f"[LOAD] {city_id} served from cache instantly")
+        log.info(f"[LOAD] {city_id} served instantly from authentic OSM cache")
+        return {
+            "message": f"Real City '{city_data['city_name']}' loaded from OpenStreetMap.",
+            "nodes": len(city_data["nodes"]),
+            "roads": len(city_data["edges"]),
+            "city_id": city_id,
+            "city_name": city_data["city_name"],
+            "source": "OpenStreetMap Authentic Geometry",
+            "cache_status": status,
+        }
     elif status == "loading":
-        # Still loading OSM, give synthetic immediately
-        log.info(f"[LOAD] {city_id} OSM still loading, serving synthetic instantly")
-        city_data = generate_city_from_config(city_id)
-        city_data["edges"] = analyze_network(city_data["nodes"], city_data["edges"])
-        source = "Synthetic (OSM loading in background)"
+        raise HTTPException(
+            status_code=503, 
+            detail="Real OpenStreetMap street network is currently loading from satellite Overpass relays. Synthetic fallback generation is strictly forbidden."
+        )
     else:
-        # Fallback: generate synthetic on the spot
-        log.info(f"[LOAD] {city_id} generating synthetic data")
-        city_data = generate_city_from_config(city_id)
-        city_data["edges"] = analyze_network(city_data["nodes"], city_data["edges"])
-        source = "Synthetic"
-
-    return {
-        "message": f"City '{city_data['city_name']}' loaded.",
-        "nodes": len(city_data["nodes"]),
-        "roads": len(city_data["edges"]),
-        "city_id": city_id,
-        "city_name": city_data["city_name"],
-        "source": source,
-        "cache_status": status,
-    }
+        log.info(f"[LOAD] On-demand loading real OSM network for {city_id}...")
+        try:
+            data = load_osm_city(city_id)
+            data["edges"] = analyze_network(data["nodes"], data["edges"])
+            align_services_to_city_nodes(city_id, list(data["nodes"].values()))
+            _cache[city_id] = data
+            _cache_status[city_id] = "ready"
+            city_data = data
+            return {
+                "message": f"Real City '{city_data['city_name']}' loaded from OpenStreetMap.",
+                "nodes": len(city_data["nodes"]),
+                "roads": len(city_data["edges"]),
+                "city_id": city_id,
+                "city_name": city_data["city_name"],
+                "source": "OpenStreetMap Authentic Geometry",
+                "cache_status": "ready",
+            }
+        except Exception as e:
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Data Unavailable: Could not retrieve authentic OpenStreetMap geometry ({e}). Synthetic fallback generation is strictly forbidden."
+            )
 
 
 # ─── City GeoJSON ─────────────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ def get_analysis():
 
 @app.get("/city/road/{road_id}")
 def get_road_detail(road_id: str):
-    """Return detailed info for a single road (for 3D simulation panel)."""
+    """Return detailed info for a single road."""
     global city_data
     for edge in city_data["edges"]:
         if edge["id"] == road_id:
@@ -205,19 +205,16 @@ def list_emergency_services():
 def road_emergency_info(road_id: str):
     """
     For a clicked road, return nearest emergency services sorted by ETA.
-    Computes road midpoint from its source/target nodes.
     """
     global city_data
     city_id = city_data.get("city_id")
     if not city_id:
         raise HTTPException(status_code=400, detail="No city loaded yet.")
 
-    # Find the road
     edge = next((e for e in city_data["edges"] if e["id"] == road_id), None)
     if not edge:
         raise HTTPException(status_code=404, detail="Road not found.")
 
-    # Compute midpoint of the road
     src = city_data["nodes"].get(edge["source"])
     tgt = city_data["nodes"].get(edge["target"])
     if not src or not tgt:
@@ -238,7 +235,8 @@ def road_emergency_info(road_id: str):
 
 # ─── Disaster Simulation ──────────────────────────────────────────────────────
 @app.post("/city/disaster")
-def run_disaster(req: DisasterRequest):
+@app.post("/city/{city_id}/disaster")
+def run_disaster(req: DisasterRequest, city_id: str = None):
     global city_data
     if not city_data["edges"]:
         raise HTTPException(status_code=400, detail="No city loaded yet.")
@@ -273,8 +271,4 @@ def get_validation():
 # ─── Legacy endpoint ──────────────────────────────────────────────────────────
 @app.get("/city/generate")
 def generate_legacy():
-    """Legacy: generate random city (kept for compatibility)."""
-    global city_data
-    city_data = generate_city()
-    city_data["edges"] = analyze_network(city_data["nodes"], city_data["edges"])
-    return {"message": f"City generated with {len(city_data['nodes'])} nodes."}
+    raise HTTPException(status_code=400, detail="Synthetic random city generation is strictly forbidden in production Digital Twin.")

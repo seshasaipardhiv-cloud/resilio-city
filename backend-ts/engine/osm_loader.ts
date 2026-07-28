@@ -44,20 +44,30 @@ export class OsmLoaderEngine {
       fs.mkdirSync(OsmLoaderEngine.CACHE_DIR, { recursive: true });
     }
     const localFile = path.join(OsmLoaderEngine.CACHE_DIR, `${cityId}.json`);
+    const possibleFiles = [
+      localFile,
+      path.join(process.cwd(), 'backend-ts', 'osm_municipal_cache', `${cityId}.json`),
+      path.join(process.cwd(), '..', 'backend-ts', 'osm_municipal_cache', `${cityId}.json`),
+      path.join(process.cwd(), 'osm_municipal_cache', `${cityId}.json`),
+    ];
 
-    // 1. Check local authentic municipal disk cache
-    if (fs.existsSync(localFile)) {
-      try {
-        const fileContent = fs.readFileSync(localFile, 'utf-8');
-        const parsed = JSON.parse(fileContent);
-        if (parsed && Array.isArray(parsed.elements) && parsed.elements.length > 200) {
-          rawElements = parsed.elements;
-          console.log(`[OSM Municipal Ingestor] Loaded ${rawElements.length} authentic OSM elements from disk cache for ${muni.name}.`);
+    // 1. Check local authentic municipal disk cache across potential deployment workdirs
+    for (const fileTarget of possibleFiles) {
+      if (fs.existsSync(fileTarget)) {
+        try {
+          const fileContent = fs.readFileSync(fileTarget, 'utf-8');
+          const parsed = JSON.parse(fileContent);
+          if (parsed && Array.isArray(parsed.elements) && parsed.elements.length > 200) {
+            rawElements = parsed.elements;
+            console.log(`[OSM Municipal Ingestor] Loaded ${rawElements.length} authentic OSM elements from disk cache (${fileTarget}) for ${muni.name}.`);
+            break;
+          }
+        } catch (err: any) {
+          console.warn(`[OSM Municipal Ingestor] Local disk cache read notice for ${cityId}: ${err.message}`);
         }
-      } catch (err: any) {
-        console.warn(`[OSM Municipal Ingestor] Local disk cache read notice for ${cityId}: ${err.message}`);
       }
     }
+
 
     // 2. If no local cache exists, perform high-speed B-Tree indexed Overpass API query via HTTP GET with retry logic
     if (rawElements.length === 0) {
