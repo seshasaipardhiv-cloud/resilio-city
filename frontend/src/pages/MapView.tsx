@@ -46,6 +46,12 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   const animFrameRef = useRef<number>(0);
   const toastRef = useRef<any>(null);
 
+  const showToast = useCallback((msg: string, type: 'info'|'success'|'warning'|'error' = 'info') => {
+    setToast({ msg, type });
+    if (toastRef.current) clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast({msg:'', type:'info'}), 4000);
+  }, []);
+
   // ── New Production Features State ──────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -172,12 +178,6 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   useEffect(() => {
     const int = setInterval(() => setSatUpdate(prev => prev + 1), 3500);
     return () => clearInterval(int);
-  }, []);
-
-  const showToast = useCallback((msg: string, type: 'info'|'success'|'warning'|'error' = 'info') => {
-    setToast({ msg, type });
-    if (toastRef.current) clearTimeout(toastRef.current);
-    toastRef.current = setTimeout(() => setToast({msg:'', type:'info'}), 4000);
   }, []);
 
   const load = useCallback(async () => {
