@@ -1,4 +1,4 @@
-import { GraphNode, GraphEdge } from './types.js';
+import { GraphNode, GraphEdge, RoutingMode, RouteResponse } from './types.js';
 
 /**
  * Graph Algorithms & Analytics Suite
@@ -156,5 +156,172 @@ export class GraphAnalyticsEngine {
       const scoreB = (b.traffic_volume_vph / Math.max(1, b.rci)) * (1 + b.failure_probability);
       return scoreB - scoreA;
     });
+  }
+
+  /**
+   * Multi-Modal Disaster-Resilient Routing Engine
+   * Calculates accurate polylines and physical metrics across 5 production modes:
+   * Shortest Path, Fastest Path, Safest Path, Flood Avoidance Route, and Earthquake Safe Route.
+   */
+  public static calculateRoute(
+    sourceId: string,
+    targetId: string,
+    mode: RoutingMode,
+    nodes: Record<string, GraphNode>,
+    edges: GraphEdge[]
+  ): RouteResponse {
+    if (!nodes[sourceId] || !nodes[targetId]) {
+      return {
+        mode,
+        path_node_ids: [],
+        path_edge_ids: [],
+        polyline: [],
+        total_distance_meters: 0,
+        estimated_travel_time_seconds: 0,
+        average_rci: 0,
+        max_failure_probability: 0,
+        hazard_score: 0,
+        status: 'NO_ROUTE_FOUND'
+      };
+    }
+
+    // Map adjacency with dynamic cost functions per routing mode
+    const adj: Map<string, Array<{ target: string; cost: number; edge: GraphEdge }>> = new Map();
+    Object.keys(nodes).forEach((n) => adj.set(n, []));
+
+    edges.forEach((e) => {
+      let cost = Infinity;
+      const time = Math.max(1, e.travel_time_seconds || (e.length_meters / 10));
+
+      if (e.damage_state === 'collapsed') {
+        cost = Infinity; // Completely inaccessible
+      } else if (mode === 'shortest') {
+        cost = e.length_meters;
+      } else if (mode === 'fastest') {
+        const congestion = e.traffic_status?.congestion_coefficient ?? 1.0;
+        cost = time * congestion;
+      } else if (mode === 'safest') {
+        cost = time * (1 + (e.failure_probability * 12) + ((100 - (e.rci || 70)) / 15));
+      } else if (mode === 'flood_avoidance') {
+        const floodDepth = e.satellite_observations?.flood_water_depth_m ?? 0;
+        if (e.damage_state === 'flooded' || floodDepth > 0.2 || e.flood_vulnerability > 0.75) {
+          cost = Infinity; // Bypass flooded or severely high-risk inundation corridors
+        } else {
+          cost = time * (1 + Math.pow((e.flood_vulnerability || 0) * 6, 2));
+        }
+      } else if (mode === 'earthquake_safe') {
+        if (e.is_bridge && e.earthquake_vulnerability > 0.5) {
+          cost = time * 25; // Heavily penalize seismic bridge bottlenecks
+        } else {
+          cost = time * (1 + Math.pow((e.earthquake_vulnerability || 0) * 5, 2) + (e.is_bridge ? 4 : 0));
+        }
+      }
+
+      if (cost !== Infinity) {
+        adj.get(e.source)?.push({ target: e.target, cost, edge: e });
+        adj.get(e.target)?.push({ target: e.source, cost, edge: e });
+      }
+    });
+
+    // Dijkstra execution
+    const dist: Map<string, number> = new Map();
+    const prev: Map<string, { node: string; edge: GraphEdge } | null> = new Map();
+    const unvisited: Set<string> = new Set(Object.keys(nodes));
+
+    Object.keys(nodes).forEach((n) => {
+      dist.set(n, Infinity);
+      prev.set(n, null);
+    });
+    dist.set(sourceId, 0);
+
+    while (unvisited.size > 0) {
+      let curr: string | null = null;
+      let minVal = Infinity;
+      for (const node of unvisited) {
+        const d = dist.get(node)!;
+        if (d < minVal) {
+          minVal = d;
+          curr = node;
+        }
+      }
+
+      if (!curr || minVal === Infinity || curr === targetId) break;
+      unvisited.delete(curr);
+
+      const neighbors = adj.get(curr) || [];
+      for (const nb of neighbors) {
+        if (!unvisited.has(nb.target)) continue;
+        const alt = dist.get(curr)! + nb.cost;
+        if (alt < dist.get(nb.target)!) {
+          dist.set(nb.target, alt);
+          prev.set(nb.target, { node: curr, edge: nb.edge });
+        }
+      }
+    }
+
+    if (dist.get(targetId) === Infinity) {
+      return {
+        mode, path_node_ids: [], path_edge_ids: [], polyline: [],
+        total_distance_meters: 0, estimated_travel_time_seconds: 0,
+        average_rci: 0, max_failure_probability: 0, hazard_score: 0,
+        status: 'NO_ROUTE_FOUND'
+      };
+    }
+
+    // Reconstruct exact path and geometry
+    const pathNodes: string[] = [];
+    const pathEdges: GraphEdge[] = [];
+    const polyline: Array<[number, number]> = [];
+    let currNode: string | null = targetId;
+
+    while (currNode && currNode !== sourceId) {
+      pathNodes.unshift(currNode);
+      const step = prev.get(currNode);
+      if (step) {
+        pathEdges.unshift(step.edge);
+        currNode = step.node;
+      } else {
+        break;
+      }
+    }
+    pathNodes.unshift(sourceId);
+
+    let totalDist = 0;
+    let totalTime = 0;
+    let totalRci = 0;
+    let maxFail = 0;
+    let hazardScore = 0;
+
+    pathEdges.forEach((e) => {
+      totalDist += e.length_meters || 0;
+      totalTime += e.travel_time_seconds || 0;
+      totalRci += e.rci || 70;
+      if ((e.failure_probability || 0) > maxFail) maxFail = e.failure_probability;
+      hazardScore += (e.failure_probability || 0) * 10 + ((100 - (e.rci || 70)) / 10);
+
+      if (e.polyline && e.polyline.length > 0) {
+        e.polyline.forEach(pt => polyline.push([pt[0], pt[1]]));
+      } else {
+        const sNode = nodes[e.source];
+        const tNode = nodes[e.target];
+        if (sNode && tNode) {
+          polyline.push([sNode.lon, sNode.lat]);
+          polyline.push([tNode.lon, tNode.lat]);
+        }
+      }
+    });
+
+    return {
+      mode,
+      path_node_ids: pathNodes,
+      path_edge_ids: pathEdges.map(e => e.id),
+      polyline,
+      total_distance_meters: Math.round(totalDist),
+      estimated_travel_time_seconds: Math.round(totalTime),
+      average_rci: pathEdges.length > 0 ? Math.round((totalRci / pathEdges.length) * 10) / 10 : 70,
+      max_failure_probability: Number(maxFail.toFixed(2)),
+      hazard_score: Math.min(100, Math.round(hazardScore)),
+      status: 'SUCCESS'
+    };
   }
 }

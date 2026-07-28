@@ -22,11 +22,15 @@ export interface SatelliteObservation {
 }
 
 export interface TrafficObservation {
-  provider?: 'Google Traffic' | 'HERE' | 'TomTom' | undefined;
+  provider?: 'Google Traffic' | 'HERE' | 'TomTom' | string | undefined;
   congestion_coefficient?: number | undefined; // 1.0 (free flow) to 4.0+ (gridlock)
   travel_time_seconds?: number | undefined;
   is_road_closed?: boolean | undefined;
   closure_reason?: string | undefined;
+  average_speed_kmh?: number | undefined;
+  incident?: string | undefined;
+  construction?: string | undefined;
+  is_live_measured?: boolean | undefined;
 }
 
 export interface GraphEdge {
@@ -57,8 +61,11 @@ export interface GraphEdge {
   earthquake_vulnerability: number; // 0.0 to 1.0
   damage_state: 'none' | 'flooded' | 'subsided' | 'collapsed' | 'obstructed';
   google_place_id?: string | undefined;
+  osm_id?: string | undefined;
+  width?: number | undefined;
   satellite_observations?: SatelliteObservation | undefined;
   traffic_status?: TrafficObservation | undefined;
+  last_updated?: string | undefined;
 }
 
 export interface EnvironmentalTelemetry {
@@ -71,6 +78,10 @@ export interface EnvironmentalTelemetry {
   ground_subsidence_mm_yr: number;
   ndvi_index: number;
   flood_extent_sq_m: number;
+  visibility_m?: number | undefined;
+  cloud_cover_percent?: number | undefined;
+  weather_alerts?: string[] | undefined;
+  is_live_weather?: boolean | undefined;
   source_verification: string;
   timestamp: string;
 }
@@ -100,4 +111,32 @@ export interface RecoveryAction {
   equipment_needed: string[];
   detour_route: string[];
   expected_recovery_hours: number;
+}
+
+export interface SearchResult {
+  name: string;
+  lat: number;
+  lon: number;
+  google_place_id?: string | undefined;
+  osm_id?: string | undefined;
+  address?: string | undefined;
+  road_type?: string | undefined;
+  confidence: number;
+  source: 'Google Places' | 'OpenStreetMap Nominatim' | 'Local Road Graph' | string;
+  target_id?: string | undefined;
+}
+
+export type RoutingMode = 'shortest' | 'fastest' | 'safest' | 'flood_avoidance' | 'earthquake_safe';
+
+export interface RouteResponse {
+  mode: RoutingMode;
+  path_node_ids: string[];
+  path_edge_ids: string[];
+  polyline: Array<[number, number]>;
+  total_distance_meters: number;
+  estimated_travel_time_seconds: number;
+  average_rci: number;
+  max_failure_probability: number;
+  hazard_score: number;
+  status: 'SUCCESS' | 'NO_ROUTE_FOUND' | 'OFFLINE';
 }

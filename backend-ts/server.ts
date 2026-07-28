@@ -6,6 +6,8 @@ import { CityDataFusionEngine } from './engine/city_data_fusion.js';
 import { PhysicsSimulationEngine } from './engine/physics_engine.js';
 import { RecoveryRecommendationEngine } from './engine/recovery_engine.js';
 import { GraphAnalyticsEngine } from './engine/graph_algorithms.js';
+import { SearchEngine } from './engine/search_engine.js';
+import { RoutingMode } from './engine/types.js';
 
 /**
  * Resilio City — GOATED Standalone TypeScript REST API Server
@@ -444,9 +446,69 @@ app.post('/city/optimize', (req: Request, res: Response): void => {
   });
 });
 
+// ── 13. Production Geocoding & Feature Search Engine ──────────────────────────
+app.get(['/api/v2/search', '/search'], async (req: Request, res: Response): Promise<void> => {
+  const query = String(req.query.q || req.query.query || "").trim();
+  const cityId = String(req.query.city_id || activeCity?.city_id || 'techno_hyderabad');
+  
+  if (!query) {
+    res.json([]);
+    return;
+  }
+
+  const model = await CityDataFusionEngine.buildUnifiedCityModel(cityId);
+  const results = await SearchEngine.search(query, model.city_name, model.nodes, model.edges);
+  res.json(results);
+});
+
+// ── 14. Multi-Modal Resilient Routing Engine ──────────────────────────────────
+app.get(['/api/v2/route', '/route'], async (req: Request, res: Response): Promise<void> => {
+  const cityId = String(req.query.city_id || activeCity?.city_id || 'techno_hyderabad');
+  const mode = (String(req.query.mode || 'fastest') as RoutingMode);
+  const sourceId = String(req.query.source || req.query.source_id || "");
+  const targetId = String(req.query.target || req.query.target_id || "");
+  const srcLat = req.query.source_lat ? Number(req.query.source_lat) : null;
+  const srcLon = req.query.source_lon ? Number(req.query.source_lon) : null;
+  const tgtLat = req.query.target_lat ? Number(req.query.target_lat) : null;
+  const tgtLon = req.query.target_lon ? Number(req.query.target_lon) : null;
+
+  const model = await CityDataFusionEngine.buildUnifiedCityModel(cityId);
+
+  const resolveNodeId = (id: string, lat: number | null, lon: number | null): string => {
+    if (id && (model.nodes as Record<string, any>)[id]) return id;
+    if (id) {
+      const edge = model.edges.find((e: any) => e.id === id);
+      if (edge && (model.nodes as Record<string, any>)[edge.source]) return edge.source;
+    }
+    if (lat !== null && lon !== null && !isNaN(lat) && !isNaN(lon)) {
+      let bestId = "";
+      let minDst = Infinity;
+      for (const [nid, node] of Object.entries(model.nodes as Record<string, any>)) {
+        const dst = Math.pow(node.lat - lat, 2) + Math.pow(node.lon - lon, 2);
+        if (dst < minDst) {
+          minDst = dst;
+          bestId = nid;
+        }
+      }
+      return bestId;
+    }
+    return "";
+  };
+
+  const resolvedSrc = resolveNodeId(sourceId, srcLat, srcLon);
+  const resolvedTgt = resolveNodeId(targetId, tgtLat, tgtLon);
+
+  if (!resolvedSrc || !resolvedTgt) {
+    res.status(400).json({ status: 'NO_ROUTE_FOUND', detail: 'Invalid or unresolved start and destination locations.' });
+    return;
+  }
+
+  const route = GraphAnalyticsEngine.calculateRoute(resolvedSrc, resolvedTgt, mode, model.nodes, model.edges);
+  res.json(route);
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`🚀 Resilio City API v2 (GOATED) running on http://0.0.0.0:${PORT}`);
 });
-
