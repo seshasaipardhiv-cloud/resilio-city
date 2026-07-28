@@ -5,3 +5,5 @@ numpy
 scipy
 ortools
 pydantic
+osmnx
+shapely
