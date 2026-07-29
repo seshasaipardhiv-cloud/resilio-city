@@ -5,6 +5,7 @@ import { CityRoadGraph, GraphNode, GraphEdge } from './types.js';
 import { MUNICIPAL_BOUNDARIES, getCameraFitBounds } from './municipal_boundaries.js';
 import { RoadParserEngine } from './road_parser.js';
 import { TTLCacheManager } from './cache_manager.js';
+import { MunicipalBoundaryClipper } from './boundary_clipper.js';
 
 /**
  * Production OpenStreetMap Municipal Overpass Ingestor & Cache Loader
@@ -28,7 +29,7 @@ export class OsmLoaderEngine {
    * Load Complete Real Municipal Road Network from OpenStreetMap
    */
   public static async loadMunicipalNetwork(cityId: string): Promise<CityRoadGraph> {
-    const cacheKey = `osm_muni_network_v4_${cityId}`;
+    const cacheKey = `osm_muni_network_v8_${cityId}`;
     const memCached = TTLCacheManager.get<CityRoadGraph>(cacheKey);
     if (memCached && memCached.edges && memCached.edges.length > 50) {
       return memCached;
@@ -69,11 +70,60 @@ export class OsmLoaderEngine {
     }
 
 
-    // 2. If no local cache exists, perform high-speed B-Tree indexed Overpass API query via HTTP GET with retry logic
+    // 2. If no local cache exists, perform Overpass API query
     if (rawElements.length === 0) {
       const [south, west, north, east] = muni.bbox;
       const bboxStr = `${south},${west},${north},${east}`;
-      const overpassQuery = `[out:json][timeout:90];(way["highway"="motorway"](${bboxStr});way["highway"="trunk"](${bboxStr});way["highway"="primary"](${bboxStr});way["highway"="secondary"](${bboxStr});way["highway"="tertiary"](${bboxStr});way["highway"="residential"](${bboxStr});way["highway"="living_street"](${bboxStr});way["highway"="service"](${bboxStr}););out body;>;out skel qt;`;
+
+      // Comprehensive Overpass query:
+      // - ALL highway classes (including footway, path, pedestrian, track, unclassified)
+      // - ALL emergency / amenity POIs (private + public hospitals, clinics, police, fire)
+      // - Traffic signals, crossings, roundabouts for intersection graph
+      const overpassQuery = `
+[out:json][timeout:120];
+(
+  way["highway"="motorway"](${bboxStr});
+  way["highway"="motorway_link"](${bboxStr});
+  way["highway"="trunk"](${bboxStr});
+  way["highway"="trunk_link"](${bboxStr});
+  way["highway"="primary"](${bboxStr});
+  way["highway"="primary_link"](${bboxStr});
+  way["highway"="secondary"](${bboxStr});
+  way["highway"="secondary_link"](${bboxStr});
+  way["highway"="tertiary"](${bboxStr});
+  way["highway"="tertiary_link"](${bboxStr});
+  way["highway"="residential"](${bboxStr});
+  way["highway"="living_street"](${bboxStr});
+  way["highway"="service"](${bboxStr});
+  way["highway"="unclassified"](${bboxStr});
+  way["highway"="road"](${bboxStr});
+  way["highway"="pedestrian"](${bboxStr});
+  way["highway"="footway"](${bboxStr});
+  way["highway"="path"](${bboxStr});
+  way["highway"="cycleway"](${bboxStr});
+  way["highway"="track"](${bboxStr});
+  way["highway"="steps"](${bboxStr});
+  node["highway"="traffic_signals"](${bboxStr});
+  node["highway"="crossing"](${bboxStr});
+  node["junction"="roundabout"](${bboxStr});
+  node["amenity"="hospital"](${bboxStr});
+  node["amenity"="clinic"](${bboxStr});
+  node["amenity"="doctors"](${bboxStr});
+  node["amenity"="pharmacy"](${bboxStr});
+  node["amenity"="nursing_home"](${bboxStr});
+  node["amenity"="fire_station"](${bboxStr});
+  node["amenity"="police"](${bboxStr});
+  node["healthcare"](${bboxStr});
+  way["amenity"="hospital"](${bboxStr});
+  way["amenity"="clinic"](${bboxStr});
+  way["amenity"="fire_station"](${bboxStr});
+  way["amenity"="police"](${bboxStr});
+  way["healthcare"](${bboxStr});
+);
+out body;
+>;
+out skel qt;
+`.trim();
 
       for (const mirror of OsmLoaderEngine.OVERPASS_MIRRORS) {
         let retries = 2;
@@ -115,7 +165,16 @@ export class OsmLoaderEngine {
     }
 
     // 4. Parse verified geometry via Road Parser Engine (Preserve 100% polyline vertices)
-    const { nodes, edges } = RoadParserEngine.parseMunicipalNetwork(cityId, rawElements);
+    const rawParsed = RoadParserEngine.parseMunicipalNetwork(cityId, rawElements);
+
+    // 5. Apply Geospatial Municipal Polygon Clipping (Removes outer rectangular box roads outside actual KMC/City borders)
+    const { nodes, edges } = await MunicipalBoundaryClipper.clipNetworkToMunicipalPolygon(
+      cityId,
+      muni.name,
+      muni.state || 'India',
+      rawParsed.nodes,
+      rawParsed.edges
+    );
 
     if (edges.length < 50) {
       console.warn(`[Validation Alert] Downloaded network for ${cityId} contained ${edges.length} segments.`);

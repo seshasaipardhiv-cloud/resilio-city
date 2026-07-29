@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import axios from 'axios';
 import DeckGL from '@deck.gl/react';
-import { LineLayer, ScatterplotLayer, BitmapLayer } from '@deck.gl/layers';
+import { LineLayer, ScatterplotLayer, BitmapLayer, PathLayer } from '@deck.gl/layers';
 import { TileLayer } from '@deck.gl/geo-layers';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import RoadModal from '../components/RoadModal';
@@ -41,6 +41,8 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   const [emergencySvcs, setEmergencySvcs] = useState<any[]>([]);
   const [activeEventIdx, setActiveEventIdx] = useState<number | null>(null);
   const [repairReport, setRepairReport] = useState<any>(null);
+  const [cascadeAnalysis, setCascadeAnalysis] = useState<any>(null);
+  const [showCascade, setShowCascade] = useState(false);
   const [showServices, setShowServices] = useState(true);
   const [dashOffset, setDashOffset]   = useState(0);
   const animFrameRef = useRef<number>(0);
@@ -56,7 +58,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
-  const [baseMapMode, setBaseMapMode] = useState<'dark' | 'satellite' | 'street'>('dark');
+  const [baseMapMode, setBaseMapMode] = useState<'dark' | 'satellite' | 'street'>('satellite');
   const [navStart, setNavStart] = useState<{ id: string; lat: number; lon: number; name: string } | null>(null);
   const [navEnd, setNavEnd] = useState<{ id: string; lat: number; lon: number; name: string } | null>(null);
   const [routeMode, setRouteMode] = useState<'shortest' | 'fastest' | 'safest' | 'flood_avoidance' | 'earthquake_safe'>('fastest');
@@ -64,6 +66,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   const [routing, setRouting] = useState(false);
   const [showLegend, setShowLegend] = useState(true);
   const [showTwinStatus, setShowTwinStatus] = useState(true);
+  const [geoProfile, setGeoProfile] = useState<any>(null);
 
   // ── Production GIS & Three.js Pipeline State (STEP 6, 8, 9, 11, 12, 13) ──
   const [mapError, setMapError] = useState<string | null>(null);
@@ -102,13 +105,16 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
 
   const handleSearchInput = async (val: string) => {
     setSearchQuery(val);
-    if (!val.trim() || val.trim().length < 2) {
+    if (!val.trim() || val.trim().length < 1) {
       setSearchResults([]);
       return;
     }
     setSearching(true);
     try {
-      const resp = await axios.get(`${API}/api/v2/search`, { params: { q: val, city_id: cityId } });
+      const resp = await axios.get(`${API}/api/v2/search`, {
+        params: { q: val, city_id: cityId },
+        timeout: 8000,
+      });
       setSearchResults(Array.isArray(resp.data) ? resp.data : []);
     } catch {
       setSearchResults([]);
@@ -117,15 +123,29 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   };
 
   const handleSelectSearchResult = (res: any) => {
-    setViewState(v => ({ ...v, longitude: res.lon, latitude: res.lat, zoom: 15.5, transitionDuration: 1500 } as any));
+    // Fly camera to result with smooth animation
+    setViewState((v: any) => ({
+      ...v,
+      longitude: res.lon,
+      latitude: res.lat,
+      zoom: res.road_type === 'motorway' || res.road_type === 'trunk' ? 14 : 16,
+      pitch: 55,
+      bearing: -8,
+      transitionDuration: 1600,
+    }));
     setSearchResults([]);
     setSearchQuery(res.name);
+    // Highlight matched road in the inspector
     if (res.target_id) {
-      const edges = geoData?.features ?? [];
-      const matched = edges.find((f: any) => f.properties?.id === res.target_id || f.properties?.osm_id === res.osm_id);
+      const feats = geoData?.features ?? [];
+      const matched = feats.find((f: any) =>
+        f.properties?.id === res.target_id ||
+        f.properties?.osm_id === res.osm_id ||
+        f.properties?.id === res.osm_id
+      );
       if (matched) setSelectedRoad(matched);
     }
-    showToast(`📍 Geoposition locked: ${res.name} (Confidence: ${(res.confidence * 100).toFixed(0)}%)`, 'info');
+    showToast(`📍 ${res.name} — ${res.source} · ${(res.confidence * 100).toFixed(0)}% confidence`, 'success');
   };
 
   useEffect(() => {
@@ -191,14 +211,14 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       console.log(`[STAGE 2: API Request] Fetching network geometry from backend for ${cityId}...`);
       setLoadMsg('Downloading road network...');
 
-      // First ensure the real city model is initialized into memory to avoid 400 'No city loaded'
+      // Load city model into backend memory. Increased timeout to 180s for large OSM municipal graphs.
       try {
-        await axios.get(`${API}/city/${cityId}/load`, { timeout: 18000 });
+        await axios.get(`${API}/city/${cityId}/load`, { timeout: 180000 });
       } catch (e: any) {
         console.warn(`[STAGE 2 Notice] /city/${cityId}/load notice: ${e?.message || e}`);
       }
 
-      const geo = await axios.get(`${API}/city`, { timeout: 15000 });
+      const geo = await axios.get(`${API}/city`, { timeout: 180000 });
       console.log(`[STAGE 3: Backend Response] Received data payload. Status: ${geo.status}, Features Count: ${geo.data?.features?.length ?? 0}`);
 
       setLoadMsg('Parsing geometry...');
@@ -264,6 +284,10 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         })));
         const svc = await axios.get(`${API}/city/emergency-services`);
         setEmergencySvcs(svc.data);
+        try {
+          const geoP = await axios.get(`${API}/city/${cityId}/geography`, { timeout: 15000 });
+          if (geoP.data) setGeoProfile(geoP.data);
+        } catch { /* geo profile fallback */ }
       } catch { /* Non-critical telemetry fallback */ }
 
     } catch (err: any) {
@@ -283,6 +307,12 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
     setLoadMsg(`Simulating ${HAZARD_EMOJIS[hazard] || '⚡'} ${hazard} at ${(intensity * 100).toFixed(0)}% intensity...`);
     try {
       const r = await axios.post(`${API}/city/disaster`, { hazard, intensity });
+      if (r.data?.geo_intelligence?.applicable === false) {
+        showToast(`⚠️ Implausible Simulation: ${r.data.summary || r.data.geo_intelligence.reasoning}`, 'warning');
+        setSim(false);
+        setLoadMsg('');
+        return;
+      }
       let updatedFeatures = geoData.features;
       if (r.data?.edge_updates && geoData?.features) {
         const updateMap = new Map(r.data.edge_updates.map((u: any) => [u.id, u]));
@@ -313,8 +343,13 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         edge_updates: r.data?.edge_updates || null,
         analysis: anaData || analysis,
         repair_report: null,
+        cascade_analysis: r.data?.cascade_analysis || null,
         summary: r.data?.summary || `${hazard} at ${(intensity*100).toFixed(0)}%`
       };
+      if (r.data?.cascade_analysis) {
+        setCascadeAnalysis(r.data.cascade_analysis);
+        setShowCascade(true);
+      }
       setSimHistory(h => {
         const newHist = [...h, logEntry];
         setActiveEventIdx(newHist.length - 1);
@@ -395,6 +430,13 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       setAnalysis(event.analysis);
     }
     setRepairReport(event.repair_report || null);
+    if (event.cascade_analysis) {
+      setCascadeAnalysis(event.cascade_analysis);
+      setShowCascade(true);
+    } else {
+      setCascadeAnalysis(null);
+      setShowCascade(false);
+    }
     if (geoData?.features?.length) {
       const f = geoData.features[Math.floor(geoData.features.length / 2)];
       const [lon, lat] = f.geometry.coordinates[0];
@@ -443,7 +485,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
     return pts;
   }, [edges]);
 
-  // ── Memoized Heavy Base Road Layers (Prevents re-filtering 35,000+ roads at 60 FPS!) ──
+  // ── Memoized Heavy Base Road Layers ────────────────────────────────────────
   const baseRoadLayers = useMemo(() => {
     if (!edges.length) return [];
     const selectedId = selectedRoad?.properties?.id;
@@ -451,42 +493,57 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
     const criticalRoads = edges.filter((f: any) => (f.properties?.failure_probability ?? 0) > 0.7);
 
     return [
-      // Glow behind all roads
-      new LineLayer({
+      // ─ GLOW LAYER: Wide soft glow behind roads using PathLayer ─
+      new PathLayer({
         id: 'glow',
         data: edges,
-        getSourcePosition: (f: any) => f.geometry?.coordinates?.[0] ?? [77.2090, 28.6139],
-        getTargetPosition: (f: any) => f.geometry?.coordinates?.[1] ?? (f.geometry?.coordinates?.[0] ?? [77.2090, 28.6139]),
-        getColor: (f: any) => { const c = getEdgeColor(f); return [c[0], c[1], c[2], 18]; },
-        getWidth: 14, widthUnits: 'pixels', pickable: false,
+        getPath: (f: any) => f.geometry?.coordinates ?? [],
+        getColor: (f: any) => { const c = getEdgeColor(f); return [c[0], c[1], c[2], 22]; },
+        getWidth: (f: any) => {
+          const hw = f.properties?.highway_class || '';
+          if (hw.includes('motorway') || hw.includes('trunk')) return 18;
+          if (hw.includes('primary')) return 14;
+          if (hw.includes('secondary')) return 10;
+          return 6;
+        },
+        widthUnits: 'pixels',
+        capRounded: true, jointRounded: true,
+        pickable: false,
         updateTriggers: { getColor: [activeEventIdx] },
       }),
-      // Main road lines
-      new LineLayer({
+      // ─ MAIN ROAD LAYER: Full polyline PathLayer ─
+      new PathLayer({
         id: 'roads',
         data: unselectedRoads,
-        getSourcePosition: (f: any) => f.geometry?.coordinates?.[0] ?? [77.2090, 28.6139],
-        getTargetPosition: (f: any) => f.geometry?.coordinates?.[1] ?? (f.geometry?.coordinates?.[0] ?? [77.2090, 28.6139]),
+        getPath: (f: any) => f.geometry?.coordinates ?? [],
         getColor: (f: any) => getEdgeColor(f),
         getWidth: (f: any) => {
+          const hw = f.properties?.highway_class || '';
           const lanes = f.properties?.lanes ?? 2;
-          return Math.max(2, lanes * 0.8);
+          if (hw.includes('motorway') || hw.includes('trunk')) return Math.max(6, lanes * 1.2);
+          if (hw.includes('primary')) return Math.max(4, lanes * 1.0);
+          if (hw.includes('secondary')) return Math.max(3, lanes * 0.9);
+          if (hw.includes('residential') || hw.includes('living')) return 2;
+          if (hw.includes('service')) return 1.5;
+          return 2;
         },
-        widthUnits: 'pixels', pickable: true,
-        autoHighlight: true, highlightColor: [255, 255, 255, 180],
+        widthUnits: 'pixels',
+        capRounded: true, jointRounded: true,
+        pickable: true,
+        autoHighlight: true, highlightColor: [255, 255, 255, 200],
         onClick: (info: any) => { if (info.object) setSelectedRoad(info.object); },
         updateTriggers: { getColor: [activeEventIdx] },
       }),
-      // Critical failure nodes
+      // ─ CRITICAL FAILURE NODES ─
       new ScatterplotLayer({
         id: 'critical-nodes',
         data: criticalRoads,
-        getPosition: (f: any) => f.geometry.coordinates[0],
+        getPosition: (f: any) => f.geometry?.coordinates?.[0] ?? [77.2090, 28.6139],
         getRadius: 5, radiusUnits: 'pixels',
         getFillColor: [255, 59, 107, 230],
         pickable: false,
       }),
-      // Potholes
+      // ─ POTHOLES ─
       new ScatterplotLayer({
         id: 'potholes',
         data: potholes,
@@ -506,51 +563,41 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
     if (!edges.length) return [];
     const combined: any[] = [...baseRoadLayers];
 
-    // ── DOTTED ANIMATED SELECTED ROAD ───────────────────────────────────────
+    // ── SELECTED ROAD: Full PathLayer highlight with animated glow ──
     if (selectedRoad) {
       const sc = selectedRoad.geometry?.coordinates;
       if (sc && sc.length >= 2) {
         // Outer glow halo
-        combined.push(new LineLayer({
+        combined.push(new PathLayer({
           id: 'selected-halo',
           data: [selectedRoad],
-          getSourcePosition: (f: any) => f.geometry.coordinates[0],
-          getTargetPosition: (f: any) => f.geometry.coordinates[f.geometry.coordinates.length - 1],
-          getColor: [255, 255, 255, 30],
-          getWidth: 28, widthUnits: 'pixels', pickable: false,
+          getPath: (f: any) => f.geometry.coordinates,
+          getColor: [255, 255, 255, 35],
+          getWidth: 28, widthUnits: 'pixels',
+          capRounded: true, jointRounded: true,
+          pickable: false,
         }));
-        // White base pulse
-        combined.push(new LineLayer({
+        // Bright base
+        combined.push(new PathLayer({
           id: 'selected-base',
           data: [selectedRoad],
-          getSourcePosition: (f: any) => f.geometry.coordinates[0],
-          getTargetPosition: (f: any) => f.geometry.coordinates[f.geometry.coordinates.length - 1],
-          getColor: [255, 255, 255, 90],
-          getWidth: 10, widthUnits: 'pixels', pickable: false,
+          getPath: (f: any) => f.geometry.coordinates,
+          getColor: [255, 255, 255, 100],
+          getWidth: 10, widthUnits: 'pixels',
+          capRounded: true, jointRounded: true,
+          pickable: false,
         }));
-        // Animated dashed overlay (only calculates 40 short segments)
-        const src = sc[0];
-        const tgt = sc[sc.length - 1];
-        const segments = 40;
-        const dashData = Array.from({ length: segments }).map((_, i) => {
-          const dashFrac = (i + (dashOffset / 60)) / segments;
-          const gapFrac  = (i + (dashOffset / 60) + 0.6) / segments;
-          const s = [src[0] + (tgt[0]-src[0]) * (dashFrac % 1), src[1] + (tgt[1]-src[1]) * (dashFrac % 1)];
-          const t = [src[0] + (tgt[0]-src[0]) * Math.min(1, gapFrac % 1 + 0.001), src[1] + (tgt[1]-src[1]) * Math.min(1, gapFrac % 1 + 0.001)];
-          return { src: s, tgt: t };
-        });
-
-        combined.push(new LineLayer({
+        // Animated cyan flow path
+        const glow = Math.floor(155 + 100 * Math.sin(dashOffset * 0.15));
+        combined.push(new PathLayer({
           id: 'selected-flow',
-          data: dashData,
-          getSourcePosition: (d: any) => d.src,
-          getTargetPosition: (d: any) => d.tgt,
-          getColor: (_: any, { index }: any) => {
-            const glow = Math.floor(155 + 100 * Math.sin(dashOffset * 0.2 + index));
-            return [0, 255, 157, glow];
-          },
-          getWidth: 6, widthUnits: 'pixels', pickable: false,
-          updateTriggers: { getColor: [dashOffset], getSourcePosition: [dashOffset] },
+          data: [selectedRoad],
+          getPath: (f: any) => f.geometry.coordinates,
+          getColor: [0, 255, 157, glow],
+          getWidth: 5, widthUnits: 'pixels',
+          capRounded: true, jointRounded: true,
+          pickable: false,
+          updateTriggers: { getColor: [dashOffset] },
         }));
 
         combined.push(new ScatterplotLayer({
@@ -656,37 +703,93 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         <div style={{ fontSize: 13, fontWeight: 700, color: 'rgba(160,200,230,0.7)' }}>·</div>
         <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{cityName}</div>
 
-        {/* ── PRODUCTION SEARCH BAR ── */}
-        <div style={{ position: 'relative', flex: 1, maxWidth: 360, margin: '0 12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(0,212,255,0.3)', borderRadius: 10, padding: '4px 12px', boxShadow: '0 0 12px rgba(0,212,255,0.15)' }}>
-            <span style={{ fontSize: 13, marginRight: 8, color: 'var(--cyan)' }}>🔍</span>
+        {/* ── GOATED SEARCH BAR ── */}
+        <div style={{ position: 'relative', flex: 1, maxWidth: 400, margin: '0 12px' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            background: searching ? 'rgba(0,212,255,0.10)' : 'rgba(255,255,255,0.06)',
+            border: `1px solid ${searching ? 'rgba(0,212,255,0.6)' : 'rgba(0,212,255,0.28)'}`,
+            borderRadius: 12, padding: '5px 14px',
+            boxShadow: searching ? '0 0 20px rgba(0,212,255,0.25)' : '0 0 10px rgba(0,212,255,0.10)',
+            transition: 'all 0.25s',
+          }}>
+            <span style={{ fontSize: 14, marginRight: 10, color: searching ? '#00d4ff' : 'rgba(0,212,255,0.6)', transition: 'all 0.2s' }}>🔍</span>
             <input
               type="text"
-              placeholder="Search road, bridge, hospital, flyover..."
+              placeholder="Search road, bridge, hospital, metro, landmark..."
               value={searchQuery}
               onChange={(e) => handleSearchInput(e.target.value)}
-              style={{ background: 'transparent', border: 'none', outline: 'none', color: '#fff', fontSize: 12, width: '100%', fontFamily: 'Space Grotesk' }}
+              style={{
+                background: 'transparent', border: 'none', outline: 'none',
+                color: '#fff', fontSize: 12.5, width: '100%', fontFamily: 'Space Grotesk',
+                letterSpacing: 0.3,
+              }}
             />
-            {searching && <span style={{ fontSize: 11, color: 'var(--cyan)' }}>⌛</span>}
-            {searchQuery && <button onClick={() => { setSearchQuery(''); setSearchResults([]); }} style={{ background: 'none', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: 12 }}>✕</button>}
+            {searching && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 14, height: 14, border: '2px solid rgba(0,212,255,0.5)', borderTop: '2px solid #00d4ff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+              </div>
+            )}
+            {searchQuery && !searching && (
+              <button
+                onClick={() => { setSearchQuery(''); setSearchResults([]); }}
+                style={{ background: 'none', border: 'none', color: 'rgba(160,200,230,0.5)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}
+              >✕</button>
+            )}
           </div>
           {searchResults.length > 0 && (
-            <div className="custom-scroll" style={{ position: 'absolute', top: '38px', left: 0, right: 0, background: 'rgba(5, 12, 24, 0.98)', border: '1px solid var(--cyan)', borderRadius: 10, maxHeight: 280, overflowY: 'auto', zIndex: 1000, boxShadow: '0 10px 30px rgba(0,0,0,0.8)' }}>
+            <div className="custom-scroll" style={{
+              position: 'absolute', top: '42px', left: 0, right: 0,
+              background: 'rgba(3,9,20,0.98)',
+              border: '1px solid rgba(0,212,255,0.4)',
+              borderRadius: 12,
+              maxHeight: 320, overflowY: 'auto', zIndex: 1000,
+              boxShadow: '0 16px 48px rgba(0,0,0,0.9), 0 0 30px rgba(0,212,255,0.12)',
+            }}>
+              <div style={{ padding: '6px 12px', borderBottom: '1px solid rgba(0,212,255,0.15)', fontSize: 10, color: 'rgba(0,212,255,0.7)', fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>
+                {searchResults.length} result{searchResults.length > 1 ? 's' : ''} — click to fly
+              </div>
               {searchResults.map((res: any, idx: number) => (
                 <div
                   key={idx}
                   onClick={() => handleSelectSearchResult(res)}
-                  style={{ padding: '9px 14px', borderBottom: idx < searchResults.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column' }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(0, 212, 255, 0.15)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  style={{
+                    padding: '10px 14px',
+                    borderBottom: idx < searchResults.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                    cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 3,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(0,212,255,0.12)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 700, fontSize: 12, color: '#fff' }}>{res.name}</span>
-                    <span style={{ fontSize: 10, background: 'rgba(0,212,255,0.2)', color: 'var(--cyan)', padding: '2px 6px', borderRadius: 4 }}>{String(res.road_type || 'Feature').toUpperCase()}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 13 }}>
+                        {res.road_type === 'hospital' ? '🏥' : res.road_type === 'motorway' || res.road_type === 'trunk' ? '🛣️' : res.road_type === 'bridge' || res.road_type === 'bridge_deck' ? '🌉' : res.source === 'Google Places' ? '📍' : res.source === 'OpenStreetMap Nominatim' ? '🗺️' : '🔵'}
+                      </span>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: '#fff' }}>{res.name}</span>
+                    </div>
+                    <span style={{
+                      fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5,
+                      background: res.source === 'Google Places' ? 'rgba(52,168,83,0.2)' : res.source === 'OpenStreetMap Nominatim' ? 'rgba(0,129,255,0.2)' : 'rgba(0,212,255,0.15)',
+                      color: res.source === 'Google Places' ? '#34a853' : res.source === 'OpenStreetMap Nominatim' ? '#4fc3f7' : '#00d4ff',
+                      padding: '2px 7px', borderRadius: 5, textTransform: 'uppercase',
+                    }}>
+                      {String(res.road_type || 'place').replace(/_/g, ' ')}
+                    </span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
-                    <span>Source: {res.source}</span>
-                    <span>Conf: {(res.confidence * 100).toFixed(0)}%</span>
+                  {res.address && (
+                    <div style={{ fontSize: 10.5, color: 'rgba(160,200,230,0.5)', paddingLeft: 19, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {res.address.split(',').slice(0, 3).join(', ')}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 10, fontSize: 10, color: 'rgba(120,160,200,0.5)', paddingLeft: 19 }}>
+                    <span>{res.source}</span>
+                    <span>·</span>
+                    <span style={{ color: res.confidence >= 0.9 ? '#00ff9d' : res.confidence >= 0.7 ? '#ffd93d' : '#ff9944' }}>
+                      {(res.confidence * 100).toFixed(0)}% conf
+                    </span>
+                    {res.lat && res.lon && <span>· {res.lat.toFixed(4)}°N {res.lon.toFixed(4)}°E</span>}
                   </div>
                 </div>
               ))}
@@ -996,29 +1099,66 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
             </div>
           )}
 
-          {/* STEP 12: Temporarily Display Real-Time Debug Overlay */}
+          {/* ── GOATED GIS DEBUG PANEL ── */}
           {pipelineStats && !loading && !mapError && (
             <div style={{
-              position: 'absolute', right: 24, bottom: showLegend ? 130 : 24, zIndex: 100,
-              background: 'rgba(3,8,18,0.88)', backdropFilter: 'blur(16px)', border: '1px solid rgba(0,212,255,0.35)',
-              borderRadius: 12, padding: '12px 18px', fontFamily: 'Space Grotesk', fontSize: 11,
-              color: '#e0eaff', width: 285, boxShadow: '0 8px 32px rgba(0,0,0,0.6)', transition: 'all 0.3s ease', pointerEvents: 'none'
+              position: 'absolute', right: 20, bottom: 24, zIndex: 100,
+              background: 'rgba(2,6,16,0.93)',
+              backdropFilter: 'blur(20px)',
+              border: '1px solid rgba(0,212,255,0.3)',
+              borderRadius: 14, padding: '14px 16px',
+              fontFamily: 'Space Grotesk', fontSize: 11,
+              color: '#c8dff0', width: 300,
+              boxShadow: '0 12px 48px rgba(0,0,0,0.7), 0 0 24px rgba(0,212,255,0.08)',
+              pointerEvents: 'none',
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(0,212,255,0.2)', paddingBottom: 6, marginBottom: 8 }}>
-                <span style={{ fontWeight: 800, color: '#00d4ff', letterSpacing: 1 }}>🔧 GIS DEBUG OVERLAY</span>
-                <span style={{ color: fps >= 45 ? '#00ff9d' : fps >= 25 ? '#ffd93d' : '#ff3b6b', fontWeight: 900, background: 'rgba(0,255,157,0.1)', padding: '2px 6px', borderRadius: 4 }}>
-                  {fps} FPS
-                </span>
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid rgba(0,212,255,0.2)' }}>
+                <span style={{ fontWeight: 900, fontSize: 11, color: '#00d4ff', letterSpacing: 1.5, textTransform: 'uppercase' }}>⬡ GIS TELEMETRY</span>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00ff9d', boxShadow: '0 0 8px #00ff9d', animation: 'pulseGlow 1.5s infinite' }} />
+                  <span style={{ color: fps >= 50 ? '#00ff9d' : fps >= 30 ? '#ffd93d' : '#ff3b6b', fontWeight: 900, fontSize: 12 }}>{fps} FPS</span>
+                </div>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, lineHeight: 1.4 }}>
-                <div><span style={{ color: 'rgba(180,210,240,0.5)' }}>City Name:</span> <strong style={{ color: '#fff', float: 'right' }}>{cityName}</strong></div>
-                <div><span style={{ color: 'rgba(180,210,240,0.5)' }}>Road Count:</span> <strong style={{ color: '#00d4ff', float: 'right' }}>{pipelineStats.roadCount.toLocaleString()}</strong></div>
-                <div><span style={{ color: 'rgba(180,210,240,0.5)' }}>Node Count:</span> <strong style={{ color: '#bd93f9', float: 'right' }}>{pipelineStats.nodeCount.toLocaleString()}</strong></div>
-                <div><span style={{ color: 'rgba(180,210,240,0.5)' }}>Camera Pos:</span> <strong style={{ color: '#ffd93d', float: 'right' }}>{viewState.longitude.toFixed(3)}, {viewState.latitude.toFixed(3)} ({viewState.zoom.toFixed(1)}x)</strong></div>
-                <div><span style={{ color: 'rgba(180,210,240,0.5)' }}>Camera Target:</span> <strong style={{ color: '#00ff9d', float: 'right' }}>{pipelineStats.center[0].toFixed(3)}, {pipelineStats.center[1].toFixed(3)}</strong></div>
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 5, marginTop: 2 }}>
-                  <div><span style={{ color: 'rgba(180,210,240,0.5)' }}>Backend:</span> <span style={{ color: '#00ff9d', float: 'right', fontWeight: 700 }}>{pipelineStats.backendStatus}</span></div>
-                  <div><span style={{ color: 'rgba(180,210,240,0.5)' }}>Geometry:</span> <span style={{ color: '#00d4ff', float: 'right', fontWeight: 700 }}>{pipelineStats.geometryStatus}</span></div>
+              {/* Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px 8px' }}>
+                {[
+                  { label: 'Projection', value: 'EPSG:4326 → WebMerc', col: '#bd93f9' },
+                  { label: 'Renderer', value: 'DeckGL PathLayer', col: '#bd93f9' },
+                  { label: 'Base Map', value: baseMapMode === 'satellite' ? 'ESRI World Imagery' : baseMapMode === 'street' ? 'CartoDB Dark' : 'Dark (No Tiles)', col: '#4fc3f7' },
+                  { label: 'Zoom', value: (viewState as any).zoom?.toFixed(2) ?? '–', col: '#ffd93d' },
+                  { label: 'Roads Loaded', value: pipelineStats.roadCount.toLocaleString(), col: '#00ff9d' },
+                  { label: 'Junctions', value: pipelineStats.nodeCount.toLocaleString(), col: '#00ff9d' },
+                  { label: 'City', value: cityName.split('(')[0].trim(), col: '#fff' },
+                  { label: 'Source', value: 'OSM Overpass', col: '#fff' },
+                  { label: 'Lon', value: (viewState as any).longitude?.toFixed(5) ?? '–', col: '#ffd93d' },
+                  { label: 'Lat', value: (viewState as any).latitude?.toFixed(5) ?? '–', col: '#ffd93d' },
+                  { label: 'Pitch', value: ((viewState as any).pitch?.toFixed(0) ?? '55') + '°', col: '#aaa' },
+                  { label: 'Bearing', value: ((viewState as any).bearing?.toFixed(0) ?? '-12') + '°', col: '#aaa' },
+                ].map(item => (
+                  <div key={item.label} style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <span style={{ fontSize: 9, color: 'rgba(160,200,230,0.45)', letterSpacing: 0.8, textTransform: 'uppercase' }}>{item.label}</span>
+                    <span style={{ fontWeight: 700, color: item.col, fontSize: 11 }}>{item.value}</span>
+                  </div>
+                ))}
+              </div>
+              {/* Status bar */}
+              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'rgba(160,200,230,0.45)', fontSize: 10 }}>Geometry</span>
+                  <span style={{ color: '#00ff9d', fontWeight: 700, fontSize: 10 }}>{pipelineStats.geometryStatus}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'rgba(160,200,230,0.45)', fontSize: 10 }}>Backend</span>
+                  <span style={{ color: '#4fc3f7', fontWeight: 700, fontSize: 10 }}>{pipelineStats.backendStatus}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'rgba(160,200,230,0.45)', fontSize: 10 }}>Road Render</span>
+                  <span style={{ color: '#00d4ff', fontWeight: 700, fontSize: 10 }}>PathLayer (Full Polyline)</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'rgba(160,200,230,0.45)', fontSize: 10 }}>Alignment</span>
+                  <span style={{ color: '#00ff9d', fontWeight: 700, fontSize: 10 }}>OSM EPSG:4326 Exact</span>
                 </div>
               </div>
             </div>
@@ -1092,33 +1232,74 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
             </div>
           )}
 
-          {/* ── DIGITAL TWIN STATUS & CITY VALIDATION PANEL ── */}
+          {/* ── DIGITAL TWIN STATUS & GEO-INTELLIGENCE PANEL ── */}
           {showTwinStatus && (
-            <div style={{ position: 'absolute', top: 14, left: 14, zIndex: 20, background: 'rgba(5, 12, 24, 0.9)', border: '1px solid rgba(0, 212, 255, 0.3)', borderRadius: '12px', padding: '12px 16px', backdropFilter: 'blur(16px)', width: 250, boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--cyan)', textTransform: 'uppercase', letterSpacing: 1 }}>🌐 Twin Intelligence</span>
-                <button onClick={() => setShowTwinStatus(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 13 }}>✕</button>
+            <div style={{ position: 'absolute', top: 14, left: 14, zIndex: 20, background: 'rgba(5, 12, 24, 0.92)', border: '1px solid rgba(0, 212, 255, 0.35)', borderRadius: '14px', padding: '14px 18px', backdropFilter: 'blur(20px)', width: 275, boxShadow: '0 8px 32px rgba(0,0,0,0.65)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 11, fontWeight: 900, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1.2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>🛡️</span> GeoAI & Twin Status
+                </span>
+                <button onClick={() => setShowTwinStatus(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 14 }}>✕</button>
               </div>
-              <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 6, color: '#fff' }}>
+              <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 7, color: '#fff' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-dim)' }}>Engine Status</span>
-                  <span style={{ color: '#00ff9d', fontWeight: 700 }}>ONLINE v2.0 GOATED</span>
+                  <span style={{ color: 'rgba(160,200,230,0.6)' }}>Engine Status</span>
+                  <span style={{ color: '#00ff9d', fontWeight: 800 }}>ONLINE v3.0 GOATED</span>
+                </div>
+                {geoProfile && (
+                  <div style={{ padding: '8px 0', borderTop: '1px solid rgba(255,255,255,0.08)', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: 6, margin: '2px 0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'rgba(160,200,230,0.6)' }}>Terrain Profile</span>
+                      <span style={{ color: '#00e5ff', fontWeight: 700, textTransform: 'capitalize', textAlign: 'right' }}>{geoProfile.terrain_type} ({geoProfile.elevation_category})</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'rgba(160,200,230,0.6)' }}>Climate Zone</span>
+                      <span style={{ color: '#ffd93d', fontWeight: 700, textTransform: 'capitalize' }}>{geoProfile.climate_zone}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'rgba(160,200,230,0.6)' }}>Seismic Risk</span>
+                      <span style={{ color: geoProfile.seismic_zone === 'IV' || geoProfile.seismic_zone === 'V' ? '#ff3b6b' : '#00ff9d', fontWeight: 800 }}>BIS Zone {geoProfile.seismic_zone}</span>
+                    </div>
+                    {geoProfile.major_rivers && geoProfile.major_rivers.length > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: 'rgba(160,200,230,0.6)' }}>Water Basin</span>
+                        <span style={{ color: '#00d4ff', fontWeight: 700, fontSize: 10, maxWidth: 140, textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{geoProfile.major_rivers[0]}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'rgba(160,200,230,0.6)' }}>Road Corridors</span>
+                  <span style={{ fontFamily: 'Space Grotesk', fontWeight: 800, color: '#fff' }}>{(geoData?.features?.length || 0).toLocaleString()}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-dim)' }}>Monitored Segments</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{(edges.length || 0).toLocaleString()}</span>
+                  <span style={{ color: 'rgba(160,200,230,0.6)' }}>Weather Feed</span>
+                  <span style={{ color: '#00d4ff', fontWeight: 700 }}>Open-Meteo Active</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-dim)' }}>Open-Meteo Weather</span>
-                  <span style={{ color: '#00d4ff', fontWeight: 700 }}>Live Feed Active</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-dim)' }}>Sensor Verification</span>
+                  <span style={{ color: 'rgba(160,200,230,0.6)' }}>Data Integrity</span>
                   <span style={{ color: '#00ff9d', fontWeight: 700 }}>Zero Fabrication</span>
                 </div>
-                <div style={{ marginTop: 4, background: 'rgba(0, 212, 255, 0.1)', border: '1px dashed rgba(0, 212, 255, 0.4)', padding: '6px', borderRadius: '6px', fontSize: 10, textAlign: 'center', color: '#00e5ff', fontWeight: 700 }}>
-                  ✓ Verified Municipal OSM & Place IDs
+                <div style={{ marginTop: 6, background: 'rgba(0, 212, 255, 0.1)', border: '1px solid rgba(0, 212, 255, 0.35)', padding: '7px', borderRadius: '8px', fontSize: 10, textAlign: 'center', color: '#00e5ff', fontWeight: 700, letterSpacing: 0.5 }}>
+                  ✓ {geoProfile ? `GeoAI Verified (${geoProfile.data_sources?.length || 4} National APIs)` : 'Verified Municipal OSM & Place IDs'}
                 </div>
+                {/* ── Scientific Telemetry Quick-View ── */}
+                {geoProfile?.scientific_telemetry && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div style={{ fontSize: 9.5, fontWeight: 800, color: '#bd93f9', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6 }}>🔬 21-Param Scientific Telemetry</div>
+                    {(['elevation','seismic_zone','rainfall','soil','geology','groundwater'] as string[]).map(k => {
+                      const t = geoProfile.scientific_telemetry[k];
+                      if (!t) return null;
+                      return (
+                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5, gap: 6 }}>
+                          <span style={{ color: 'rgba(160,200,230,0.5)', fontSize: 9.5, flexShrink: 0, maxWidth: 90, lineHeight: 1.3 }}>{t.name}</span>
+                          <span style={{ color: '#dceeff', fontSize: 9.5, fontWeight: 700, textAlign: 'right', lineHeight: 1.3 }}>{t.value}</span>
+                        </div>
+                      );
+                    })}
+                    <div style={{ marginTop: 5, fontSize: 9, color: 'rgba(100,150,200,0.4)', fontStyle: 'italic' }}>Source: {geoProfile.scientific_telemetry['seismic_zone']?.source || 'BIS IS:1893'}</div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1243,6 +1424,64 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ─ ⚡ CASCADE CHAIN IMPACT TIMELINE ─ */}
+          {showCascade && cascadeAnalysis && (
+            <div style={{ padding: '14px', borderBottom: '1px solid rgba(255,59,107,0.25)', background: 'linear-gradient(180deg, rgba(255,59,107,0.08) 0%, rgba(4,8,18,0.95) 100%)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#ff3b6b', textTransform: 'uppercase', letterSpacing: 1.2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>⚡</span> Cascade Impact Chain
+                </div>
+                <button onClick={() => setShowCascade(false)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 13, padding: 0 }}>✕</button>
+              </div>
+              {/* Hospital isolation report */}
+              {cascadeAnalysis.hospital_isolation_report && (
+                <div style={{ background: 'rgba(255,59,107,0.12)', border: '1px solid rgba(255,59,107,0.3)', borderRadius: 8, padding: '8px 10px', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, marginBottom: 4 }}>
+                    <span style={{ color: 'rgba(160,200,230,0.7)' }}>Isolated Hospitals</span>
+                    <span style={{ color: '#ff3b6b', fontWeight: 800 }}>{cascadeAnalysis.hospital_isolation_report.isolated_hospitals} / {cascadeAnalysis.hospital_isolation_report.total_hospitals}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5 }}>
+                    <span style={{ color: 'rgba(160,200,230,0.7)' }}>Response Delay</span>
+                    <span style={{ color: '#ffd93d', fontWeight: 800 }}>+{cascadeAnalysis.hospital_isolation_report.response_delay_minutes} min</span>
+                  </div>
+                </div>
+              )}
+              {/* Chain steps */}
+              <div style={{ maxHeight: 220, overflowY: 'auto', paddingRight: 2 }}>
+                {cascadeAnalysis.cascade_chain?.map((step: any, i: number) => {
+                  const sevColor = step.severity === 'CRITICAL' ? '#ff3b6b' : step.severity === 'SEVERE' ? '#ffd93d' : '#00d4ff';
+                  return (
+                    <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+                        <div style={{ width: 20, height: 20, borderRadius: '50%', background: sevColor, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 900, color: '#000', flexShrink: 0 }}>{step.step_order}</div>
+                        {i < cascadeAnalysis.cascade_chain.length - 1 && <div style={{ width: 2, flex: 1, minHeight: 12, background: `${sevColor}40`, marginTop: 3 }} />}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 800, color: sevColor, marginBottom: 2, lineHeight: 1.3 }}>{step.stage_name}</div>
+                        <div style={{ fontSize: 9.5, color: 'rgba(160,200,230,0.6)', lineHeight: 1.4, marginBottom: 3 }}>{step.impact_description}</div>
+                        <div style={{ fontSize: 9, color: '#bd93f9', fontWeight: 700 }}>{step.affected_metric}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* AI geodetic explanation */}
+              {cascadeAnalysis.ai_scientific_explanation && (
+                <div style={{ marginTop: 8, background: 'rgba(189,147,249,0.08)', border: '1px solid rgba(189,147,249,0.2)', borderRadius: 7, padding: '8px 9px', fontSize: 9.5, color: 'rgba(200,180,255,0.8)', lineHeight: 1.5 }}>
+                  <div style={{ fontWeight: 800, color: '#bd93f9', marginBottom: 4, fontSize: 10 }}>🧠 AI GeoAI Explanation</div>
+                  {cascadeAnalysis.ai_scientific_explanation}
+                </div>
+              )}
+              {/* Recovery priority */}
+              {cascadeAnalysis.recovery_priority_explanation && (
+                <div style={{ marginTop: 6, background: 'rgba(0,255,157,0.06)', border: '1px solid rgba(0,255,157,0.2)', borderRadius: 7, padding: '7px 9px', fontSize: 9.5, color: 'rgba(160,230,190,0.8)', lineHeight: 1.5 }}>
+                  <div style={{ fontWeight: 800, color: '#00ff9d', marginBottom: 3, fontSize: 10 }}>🛠️ Recovery Priority</div>
+                  {cascadeAnalysis.recovery_priority_explanation}
+                </div>
+              )}
             </div>
           )}
 

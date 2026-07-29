@@ -1,4 +1,7 @@
 import { GraphNode, GraphEdge, EnvironmentalTelemetry } from './types.js';
+import { GeographicIntelligenceEngine } from './geographic_intelligence.js';
+import { MUNICIPAL_BOUNDARIES } from './municipal_boundaries.js';
+import { CITY_OSM_CONFIG } from './osm_loader.js';
 
 /**
  * Production Disaster Physics Engine
@@ -8,6 +11,56 @@ import { GraphNode, GraphEdge, EnvironmentalTelemetry } from './types.js';
  */
 
 export class DisasterPhysicsEngine {
+  /**
+   * Evaluate if a proposed hazard is scientifically applicable and what mitigation priorities exist for this municipality.
+   */
+  public static assessHazardApplicability(
+    cityId: string,
+    hazardType: string
+  ): { applicable: boolean; risk_level: 'high' | 'medium' | 'low' | 'na' | 'not_applicable'; reasoning: string; mitigation_priority: string[] } {
+    const muni = MUNICIPAL_BOUNDARIES[cityId] || CITY_OSM_CONFIG[cityId];
+    if (!muni) {
+      return {
+        applicable: true,
+        risk_level: 'medium',
+        reasoning: `Standard urban disaster vulnerability evaluation applied for ${hazardType}.`,
+        mitigation_priority: ['Municipal drainage upkeep', 'Structural bridge monitoring']
+      };
+    }
+
+    const profile = GeographicIntelligenceEngine.buildGeographicProfile(
+      cityId,
+      muni.name,
+      muni.center_lat,
+      muni.center_lon,
+      muni.average_elevation_meters,
+      muni.state,
+      muni.major_rivers || [],
+      muni.area_sq_km || 200
+    );
+
+    const normHazard = hazardType.toLowerCase().trim();
+    const found = profile.hazard_assessments.find((h: any) => normHazard.includes(h.hazard.toLowerCase()) || h.hazard.toLowerCase().includes(normHazard));
+
+    if (!found || found.risk_level === 'not_applicable' || found.risk_level === ('na' as any)) {
+      if (normHazard.includes('tsunami') || normHazard.includes('surge') || (normHazard.includes('cyclone') && profile.coastal_distance_km > 250)) {
+        return {
+          applicable: false,
+          risk_level: 'not_applicable',
+          reasoning: `${muni.name} is an inland municipality situated ${profile.coastal_distance_km} km away from the nearest marine coastline at ${muni.average_elevation_meters}m elevation. Oceanic storm surges or tsunamis are scientifically implausible under normal topographic physics.`,
+          mitigation_priority: []
+        };
+      }
+    }
+
+    return {
+      applicable: found ? found.risk_level !== 'not_applicable' : true,
+      risk_level: found ? (found.risk_level as any) : 'medium',
+      reasoning: found ? found.reasoning : `Standard multi-hazard structural assessment for ${muni.name} across its ${profile.terrain_type} terrain and ${profile.climate_zone} climate.`,
+      mitigation_priority: found && found.mitigation_notes ? [found.mitigation_notes] : ['Infrastructure reinforcement']
+    };
+  }
+
   private static readonly MAJOR_RIVER_COORDINATES: Array<{ name: string; lat: number; lon: number; influence_km: number }> = [
     { name: "Musi River (Hyderabad)", lat: 17.3780, lon: 78.4750, influence_km: 3.5 },
     { name: "Hussain Sagar Lake (Hyderabad)", lat: 17.4239, lon: 78.4738, influence_km: 2.0 },

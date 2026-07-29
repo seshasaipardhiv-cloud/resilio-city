@@ -7,6 +7,10 @@ import { DisasterPhysicsEngine } from './disaster_physics.js';
  * and earthquake PGA structural degradation calculations.
  */
 export class PhysicsSimulationEngine {
+  public static assessHazardApplicability(cityId: string, hazardType: string) {
+    return DisasterPhysicsEngine.assessHazardApplicability(cityId, hazardType);
+  }
+
   public static runSimulation(
     disasterType: string,
     intensity: number, // scale 1-10 or 0-1

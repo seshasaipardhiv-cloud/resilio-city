@@ -1,4 +1,4 @@
-export type NodeType = 'intersection' | 'bridge' | 'tunnel' | 'roundabout' | 'traffic_signal' | 'hospital' | 'fire_station' | 'police_station' | 'airport' | 'railway_crossing';
+export type NodeType = 'intersection' | 'bridge' | 'tunnel' | 'roundabout' | 'traffic_signal' | 'hospital' | 'clinic' | 'pharmacy' | 'nursing_home' | 'fire_station' | 'police' | 'police_station' | 'airport' | 'railway_crossing';
 export type EdgeType = 'road_segment' | 'bridge_deck' | 'flyover' | 'tunnel' | 'service_road';
 
 export interface GraphNode {

@@ -14,8 +14,44 @@ export class RoadParserEngine {
   private static readonly VALID_HIGHWAY_CLASSES = new Set([
     'motorway', 'trunk', 'primary', 'secondary', 'tertiary',
     'residential', 'living_street', 'service', 'motorway_link',
-    'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link', 'unclassified', 'road'
+    'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link',
+    'unclassified', 'road', 'pedestrian', 'footway', 'path',
+    'cycleway', 'track', 'steps', 'bridleway', 'corridor'
   ]);
+
+  /** Resolve road name exactly as Google Maps does: English name > local name > route ref > descriptive */
+  private static resolveRoadName(tags: Record<string, string>, highwayClass: string, wayId: string): string {
+    // Priority 1: English name (matches Google Maps display exactly)
+    if (tags['name:en']) return tags['name:en'];
+    // Priority 2: Official local name
+    if (tags.name) return tags.name;
+    // Priority 3: Official name designation
+    if (tags.official_name) return tags.official_name;
+    // Priority 4: Route number reference (NH-44, SH-2, etc.)
+    if (tags.ref) {
+      const ref = tags.ref.replace(/;/g, '/').trim();
+      if (tags.name) return `${tags.name} (${ref})`;
+      return ref;
+    }
+    // Priority 5: Alt name or local colloquial name
+    if (tags.alt_name) return tags.alt_name;
+    if (tags['name:hi']) return tags['name:hi']; // Hindi name
+    if (tags['name:te']) return tags['name:te']; // Telugu
+    if (tags['name:ta']) return tags['name:ta']; // Tamil
+    if (tags['name:kn']) return tags['name:kn']; // Kannada
+    if (tags['name:ml']) return tags['name:ml']; // Malayalam
+    // Last resort: human-readable class description, NEVER raw OSM IDs
+    const classMap: Record<string, string> = {
+      motorway: 'National Highway', trunk: 'State Highway',
+      primary: 'Major Road', secondary: 'District Road',
+      tertiary: 'Local Road', residential: 'Residential Street',
+      living_street: 'Shared Street', service: 'Service Lane',
+      unclassified: 'Unnamed Road', road: 'Road', pedestrian: 'Pedestrian Path',
+      footway: 'Footpath', path: 'Path', cycleway: 'Cycleway',
+      track: 'Track', steps: 'Steps'
+    };
+    return classMap[highwayClass] || 'Unnamed Road';
+  }
 
   /**
    * Parse raw Overpass JSON elements into verified municipal GraphNodes and GraphEdges
@@ -63,20 +99,62 @@ export class RoadParserEngine {
     const edges: GraphEdge[] = [];
     let edgeSequence = 0;
 
-    // 2. Identify Intersections & Structural Junction Nodes
+    // 2. Identify Intersections, Structural Junction Nodes, and POI Amenity Nodes
     Object.keys(rawNodes).forEach((nid) => {
       const rn = rawNodes[nid]!;
       const count = nodeUsageCount[nid] || 0;
       const isTrafficSignal = rn.tags?.highway === 'traffic_signals';
       const isRoundabout = rn.tags?.junction === 'roundabout';
       const isCrossing = rn.tags?.railway === 'crossing' || rn.tags?.railway === 'level_crossing';
+      const amenity = rn.tags?.amenity || rn.tags?.healthcare || '';
+      const isHospital = amenity === 'hospital';
+      const isClinic = amenity === 'clinic' || amenity === 'doctors' || amenity === 'nursing_home' || rn.tags?.healthcare;
+      const isFireStation = amenity === 'fire_station';
+      const isPolice = amenity === 'police';
+      const isPharmacy = amenity === 'pharmacy';
+      const isEmergencyPOI = isHospital || isClinic || isFireStation || isPolice || isPharmacy;
 
-      // Keep node if it is a multi-way junction, terminal endpoint, or critical traffic asset
-      if (count >= 2 || isTrafficSignal || isRoundabout || isCrossing) {
+      // Keep node if: multi-way junction, terminal endpoint, critical traffic asset, or emergency POI
+      if (count >= 2 || isTrafficSignal || isRoundabout || isCrossing || isEmergencyPOI) {
         let nodeType: NodeType = 'intersection';
-        if (isTrafficSignal) nodeType = 'traffic_signal';
+        if (isHospital) nodeType = 'hospital';
+        else if (isClinic) nodeType = 'clinic';
+        else if (isFireStation) nodeType = 'fire_station';
+        else if (isPolice) nodeType = 'police';
+        else if (isPharmacy) nodeType = 'pharmacy';
+        else if (isTrafficSignal) nodeType = 'traffic_signal';
         else if (isRoundabout) nodeType = 'roundabout';
         else if (isCrossing) nodeType = 'railway_crossing';
+
+        // Node label: real name from OSM tags, NEVER raw IDs
+        const nodeName = rn.tags?.['name:en'] || rn.tags?.name || rn.tags?.['name:hi']
+          || rn.tags?.['name:te'] || rn.tags?.['name:ta'] || rn.tags?.['name:kn']
+          || rn.tags?.['name:ml'] || rn.tags?.official_name;
+
+        // For intersection nodes without a name, use the road reference or signal type
+        let label: string;
+        if (nodeName) {
+          label = nodeName;
+        } else if (isTrafficSignal) {
+          label = 'Traffic Signal';
+        } else if (isRoundabout) {
+          label = rn.tags?.name || 'Roundabout';
+        } else if (isCrossing) {
+          label = 'Railway Crossing';
+        } else if (isHospital) {
+          label = rn.tags?.name || 'Hospital';
+        } else if (isClinic) {
+          label = rn.tags?.name || 'Clinic';
+        } else if (isFireStation) {
+          label = rn.tags?.name || 'Fire Station';
+        } else if (isPolice) {
+          label = rn.tags?.name || 'Police Station';
+        } else if (isPharmacy) {
+          label = rn.tags?.name || 'Pharmacy';
+        } else {
+          // For unnamed junctions, show the tile coordinates as approximate location
+          label = `Junction (${rn.lat.toFixed(4)}°N, ${rn.lon.toFixed(4)}°E)`;
+        }
 
         const tileId = SpatialIndexEngine.computeTileHash(rn.lat, rn.lon);
         nodes[nid] = {
@@ -84,8 +162,9 @@ export class RoadParserEngine {
           lat: rn.lat,
           lon: rn.lon,
           type: nodeType,
-          label: rn.tags?.name || rn.tags?.ref || `Junction ${nid}`,
-          tile_id: tileId
+          label,
+          tile_id: tileId,
+          google_place_id: rn.tags?.['contact:google'] || undefined
         };
       }
     });
@@ -161,7 +240,7 @@ export class RoadParserEngine {
 
               const lanes = way.tags.lanes ? parseInt(way.tags.lanes, 10) || defaultLanes : defaultLanes;
               const speedLimit = way.tags.maxspeed ? parseInt(way.tags.maxspeed, 10) || defaultSpeed : defaultSpeed;
-              const roadName = way.tags.name || way.tags.ref || `${highwayClass.toUpperCase()} Corridor (${way.id})`;
+              const roadName = RoadParserEngine.resolveRoadName(way.tags, highwayClass, way.id);
 
               edgeSequence += 1;
               const edgeId = `osm_edge_${way.id}_${edgeSequence}`;

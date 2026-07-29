@@ -7,3 +7,6 @@ build/
 *.d.ts.map
 .env
 .cache/
+osm_municipal_cache/
+municipal_polygons_cache/
+data/
