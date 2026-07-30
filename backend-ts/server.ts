@@ -1,3 +1,6 @@
+import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
 import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import { CITY_CONFIGS } from './engine/cities.js';
@@ -869,6 +872,48 @@ app.get('/cities/all', (_req: Request, res: Response): void => {
   const index = buildCityNameIndex();
   res.json({ count: index.length, cities: index });
 });
+
+// ── NEW: City Administrative Boundary Polygon (/city/:id/boundary) ──────────
+// Returns the official OSM municipal boundary polygon from the polygon cache
+app.get('/city/:id/boundary', async (req: Request, res: Response): Promise<void> => {
+  const cityId = String(req.params['id'] || '');
+  // Check polygon cache from boundary_clipper
+  const cacheDir = path.join(process.cwd(), 'municipal_polygons_cache');
+  const cacheFile = path.join(cacheDir, `${cityId}.json`);
+
+  if (fs.existsSync(cacheFile)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(cacheFile, 'utf-8'));
+      // raw is a GeoJSON polygon with coordinates[0] being the outer ring
+      const coords = raw.coordinates?.[0] || raw.geometry?.coordinates?.[0];
+      if (coords && Array.isArray(coords) && coords.length >= 3) {
+        res.json({ cityId, type: 'Polygon', coordinates: coords });
+        return;
+      }
+    } catch { /* fallback */ }
+  }
+
+  // Try bounding box fallback from MUNICIPAL_BOUNDARIES
+  const muni = MUNICIPAL_BOUNDARIES[cityId] || CITY_OSM_CONFIG[cityId];
+  if (muni && muni.bbox) {
+    const [minLon, minLat, maxLon, maxLat] = muni.bbox;
+    // Pad slightly for display
+    const pad = 0.01;
+    res.json({
+      cityId, type: 'BBox',
+      coordinates: [
+        [minLon - pad, minLat - pad], [maxLon + pad, minLat - pad],
+        [maxLon + pad, maxLat + pad], [minLon - pad, maxLat + pad],
+        [minLon - pad, minLat - pad]
+      ]
+    });
+    return;
+  }
+
+  res.status(404).json({ error: `No boundary polygon found for '${cityId}'` });
+});
+
+
 
 // ── AUTH ROUTES ──────────────────────────────────────────────────────────────
 

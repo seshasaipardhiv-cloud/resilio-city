@@ -167,14 +167,18 @@ export default function Landing({ onSelectCity }: Props) {
     }
   };
 
-  const rciColor = (rci: number) => rci >= 75 ? '#00ff9d' : rci >= 50 ? '#ffd93d' : '#ff3b6b';
-  const healthBadge = (rci: number) => rci >= 75 ? ['GOOD', '#00ff9d'] : rci >= 50 ? ['FAIR', '#ffd93d'] : ['CRITICAL', '#ff3b6b'];
+  const rciColor = (rci: number) => rci >= 75 ? '#00ff9d' : rci >= 55 ? '#ffd200' : rci >= 35 ? '#ff8c00' : '#ff2850';
+  const healthBadge = (rci: number): [string, string] =>
+    rci >= 75 ? ['GOOD', '#00ff9d'] : rci >= 55 ? ['FAIR', '#ffd200'] : rci >= 35 ? ['POOR', '#ff8c00'] : ['CRITICAL', '#ff2850'];
 
   const totalRoads   = cities.reduce((a, c) => a + c.total_roads, 0);
   const totalCrit    = cities.reduce((a, c) => a + c.critical_roads, 0);
   const totalPop     = cities.reduce((a, c) => a + c.population_covered, 0);
   const avgRci       = cities.length ? cities.reduce((a, c) => a + c.avg_rci, 0) / cities.length : 0;
   const loadingCityObj = cities.find(c => c.id === loadingCity);
+
+  // Deduplicate cities by id to prevent React key warnings
+  const uniqueCities = cities.filter((c, i, arr) => arr.findIndex(x => x.id === c.id) === i);
 
   return (
     <div style={{
@@ -186,14 +190,13 @@ export default function Landing({ onSelectCity }: Props) {
       {/* Dark overlay */}
       <div style={{
         position: 'absolute', inset: 0, zIndex: 0,
-        background: 'linear-gradient(180deg, rgba(3,6,16,0.85) 0%, rgba(5,10,22,0.85) 40%, rgba(3,6,16,0.95) 100%)',
+        background: 'linear-gradient(180deg, rgba(3,6,16,0.9) 0%, rgba(5,10,22,0.88) 40%, rgba(3,6,16,0.97) 100%)',
       }} />
 
       {/* ── CITY LOADING OVERLAY ── */}
       {loadingCity && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(2,5,14,0.96)', backdropFilter: 'blur(20px)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 0 }}>
           <div style={{ textAlign: 'center', position: 'relative' }}>
-            {/* Rotating rings */}
             <div style={{ position: 'relative', width: 140, height: 140, margin: '0 auto 24px' }}>
               <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `3px solid ${loadingCityObj?.theme ?? '#00d4ff'}30`, animation: 'spin 2s linear infinite' }} />
               <div style={{ position: 'absolute', inset: 10, borderRadius: '50%', border: `2px solid ${loadingCityObj?.theme ?? '#00d4ff'}60`, animation: 'spin 1.5s linear infinite reverse' }} />
@@ -224,21 +227,26 @@ export default function Landing({ onSelectCity }: Props) {
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
 
         {/* ── HEADER ── */}
-        <div style={{ padding: '20px 36px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(0,212,255,0.1)', background: 'rgba(3,8,18,0.7)', backdropFilter: 'blur(20px)' }}>
+        <div style={{ padding: '16px 36px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(0,212,255,0.15)', background: 'rgba(3,8,18,0.8)', backdropFilter: 'blur(20px)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ width: 42, height: 42, borderRadius: 14, background: 'linear-gradient(135deg, rgba(0,212,255,0.25), rgba(0,100,200,0.2))', border: '1px solid rgba(0,212,255,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, boxShadow: '0 0 20px rgba(0,212,255,0.2)' }}>🏙️</div>
             <div>
               <div style={{ fontFamily: 'Space Grotesk', fontWeight: 900, fontSize: 22, background: 'linear-gradient(90deg, #00d4ff 0%, #00ff9d 60%, #bd93f9 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', letterSpacing: 2 }}>RESILIO CITY</div>
-              <div style={{ fontSize: 10, color: 'rgba(0,212,255,0.5)', letterSpacing: 3, textTransform: 'uppercase', marginTop: 2 }}>AI Infrastructure Resilience Platform</div>
+              <div style={{ fontSize: 10, color: 'rgba(0,212,255,0.5)', letterSpacing: 3, textTransform: 'uppercase', marginTop: 2 }}>AI Infrastructure Resilience Platform · YOLOv8 Road Detection</div>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            {/* YOLO Road Detection Badge */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#ffd200', fontWeight: 700, background: 'rgba(255,210,0,0.1)', border: '1px solid rgba(255,210,0,0.3)', padding: '6px 14px', borderRadius: 10 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ffd200', boxShadow: '0 0 8px #ffd200', animation: 'pulseGlow 2s infinite' }} />
+              🤖 YOLOv8 Road Detection Active
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#00ff9d', fontWeight: 700, background: 'rgba(0,255,157,0.08)', border: '1px solid rgba(0,255,157,0.2)', padding: '6px 14px', borderRadius: 10 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#00ff9d', boxShadow: '0 0 8px #00ff9d', animation: 'pulse 2s infinite' }} />
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#00ff9d', boxShadow: '0 0 8px #00ff9d', animation: 'pulseGlow 2s infinite' }} />
               SYSTEM ONLINE
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-              {[['⚡', 'MCP Server', '#ffd93d'], ['🛰️', 'DeckGL', '#00d4ff'], ['🧠', 'AI Engine', '#bd93f9']].map(([ic, lb, col]) => (
+              {[['⚡', 'MCP', '#ffd93d'], ['🛰️', 'DeckGL', '#00d4ff'], ['🧠', 'GeoAI', '#bd93f9'], ['🗺️', 'OSM Boundary', '#00ff9d']].map(([ic, lb, col]) => (
                 <div key={lb} style={{ fontSize: 11, color: col as string, background: `${col as string}10`, border: `1px solid ${col as string}30`, borderRadius: 8, padding: '4px 10px', fontWeight: 700 }}>{ic} {lb}</div>
               ))}
             </div>
@@ -246,44 +254,43 @@ export default function Landing({ onSelectCity }: Props) {
         </div>
 
         {/* ── GLOBAL STATS BAR ── */}
-        <div style={{ padding: '16px 36px', display: 'flex', flexWrap: 'wrap', gap: 16, borderBottom: '1px solid rgba(0,212,255,0.1)' }}>
+        <div style={{ padding: '12px 36px', display: 'flex', flexWrap: 'wrap', gap: 12, borderBottom: '1px solid rgba(0,212,255,0.1)', background: 'rgba(5,10,24,0.5)', backdropFilter: 'blur(10px)', flexShrink: 0 }}>
           {[
-            { label: 'Total Roads Monitored', val: totalRoads.toLocaleString(), color: '#00d4ff', icon: '🛣️', sub: 'Across all networks' },
-            { label: 'Avg Network RCI',       val: avgRci.toFixed(1) + '%',      color: rciColor(avgRci), icon: '📊', sub: avgRci >= 65 ? 'Healthy Network' : 'Needs Attention' },
-            { label: 'Critical Alerts',       val: totalCrit,                    color: '#ff3b6b', icon: '🚨', sub: 'High-risk segments' },
-            { label: 'Population Covered',    val: (totalPop / 1e6).toFixed(1) + 'M', color: '#bd93f9', icon: '👥', sub: 'Citizens monitored' },
-            { label: 'Cities Monitored',      val: cities.length,                color: '#ffd93d', icon: '📍', sub: 'Live networks' },
+            { label: 'Roads Monitored', val: totalRoads.toLocaleString(), color: '#00d4ff', icon: '🛣️' },
+            { label: 'Avg RCI Score',   val: avgRci.toFixed(1) + '%',     color: rciColor(avgRci), icon: '📊' },
+            { label: 'Critical Alerts', val: totalCrit,                   color: '#ff2850', icon: '🚨' },
+            { label: 'Population',      val: (totalPop / 1e6).toFixed(1) + 'M', color: '#bd93f9', icon: '👥' },
+            { label: 'Cities',          val: uniqueCities.length,         color: '#ffd200', icon: '📍' },
           ].map(s => (
-            <div key={s.label} style={{ flex: '1 1 200px', minWidth: '220px', background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '16px 20px', position: 'relative', overflow: 'hidden', transition: 'all 0.25s', boxShadow: '0 4px 15px rgba(0,0,0,0.2)' }}>
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, transparent, ${s.color}80, transparent)` }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div key={s.label} style={{ flex: '1 1 160px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '10px 16px', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, transparent, ${s.color}70, transparent)` }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontSize: 11, color: 'rgba(180,215,245,0.55)', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6, fontWeight: 700 }}>{s.label}</div>
-                  <div style={{ fontSize: 24, fontWeight: 900, color: s.color, fontFamily: 'Space Grotesk', lineHeight: 1.1 }}>{s.val}</div>
-                  <div style={{ fontSize: 11, color: 'rgba(160,200,230,0.45)', marginTop: 5 }}>{s.sub}</div>
+                  <div style={{ fontSize: 10, color: 'rgba(180,215,245,0.45)', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 4, fontWeight: 700 }}>{s.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: s.color, fontFamily: 'Space Grotesk', lineHeight: 1.1 }}>{s.val}</div>
                 </div>
-                <div style={{ fontSize: 26, opacity: 0.85, filter: `drop-shadow(0 0 8px ${s.color}40)` }}>{s.icon}</div>
+                <div style={{ fontSize: 22, opacity: 0.8, filter: `drop-shadow(0 0 6px ${s.color}50)` }}>{s.icon}</div>
               </div>
             </div>
           ))}
         </div>
 
-        {/* ── TITLE ROW & LIVE CITY SEARCH ── */}
-        <div style={{ padding: '22px 36px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            <div style={{ fontSize: 15, fontWeight: 900, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2.2, fontFamily: 'Space Grotesk', textShadow: '0 0 15px rgba(0,212,255,0.3)' }}>
+        {/* ── SEARCH + TITLE ── */}
+        <div style={{ padding: '14px 36px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 900, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 2.2, fontFamily: 'Space Grotesk', textShadow: '0 0 15px rgba(0,212,255,0.3)' }}>
               Select Municipal Digital Twin
             </div>
-            <div style={{ fontSize: 11, fontWeight: 800, color: '#00ff9d', background: 'rgba(0,255,157,0.1)', border: '1px solid rgba(0,255,157,0.35)', padding: '5px 14px', borderRadius: 20, display: 'flex', alignItems: 'center', gap: 6, boxShadow: '0 0 12px rgba(0,255,157,0.15)' }}>
-              <span>✨</span> Official OSM MultiPolygon Clipping Active
+            <div style={{ fontSize: 10, fontWeight: 800, color: '#00ff9d', background: 'rgba(0,255,157,0.1)', border: '1px solid rgba(0,255,157,0.3)', padding: '4px 12px', borderRadius: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>✨</span> OSM Boundary Clipping · Admin Border Rendering
             </div>
           </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: '1 1 360px', maxWidth: 540, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 280px', position: 'relative', minWidth: '260px' }}>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '1 1 360px', maxWidth: 520, justifyContent: 'flex-end' }}>
+            <div style={{ flex: '1 1 260px', position: 'relative' }}>
               <input
                 type="text"
-                placeholder="🔍 Search City or State (Mumbai, Delhi, Kolkata, Hyderabad...)"
+                placeholder="🔍 Search City or State..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 style={{
@@ -291,34 +298,33 @@ export default function Landing({ onSelectCity }: Props) {
                   background: 'rgba(10, 20, 38, 0.9)',
                   border: '1px solid rgba(0, 212, 255, 0.4)',
                   borderRadius: 24,
-                  padding: '10px 38px 10px 38px',
+                  padding: '9px 36px 9px 36px',
                   color: '#ffffff',
                   fontFamily: 'Space Grotesk',
                   fontSize: 13,
                   outline: 'none',
-                  transition: 'all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                  boxShadow: '0 4px 20px rgba(0,212,255,0.18), inset 0 2px 6px rgba(0,0,0,0.4)'
+                  boxShadow: '0 4px 20px rgba(0,212,255,0.15)',
+                  boxSizing: 'border-box',
                 }}
               />
-              <span style={{ position: 'absolute', left: 14, top: 11, fontSize: 15 }}>📍</span>
+              <span style={{ position: 'absolute', left: 13, top: 10, fontSize: 14 }}>📍</span>
               {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  style={{ position: 'absolute', right: 14, top: 11, background: 'transparent', border: 'none', color: '#ff3b6b', cursor: 'pointer', fontWeight: 800, fontSize: 14 }}
-                >
-                  ✕
-                </button>
+                <button onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: 13, top: 10, background: 'transparent', border: 'none', color: '#ff3b6b', cursor: 'pointer', fontWeight: 800, fontSize: 13 }}>✕</button>
               )}
             </div>
-
-            <div style={{ fontSize: 12, fontWeight: 800, color: '#00d4ff', background: 'rgba(0,212,255,0.12)', border: '1px solid rgba(0,212,255,0.35)', padding: '8px 16px', borderRadius: 20, whiteSpace: 'nowrap' }}>
-              {cities.length} Active Municipalities
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#00d4ff', background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.3)', padding: '7px 14px', borderRadius: 20, whiteSpace: 'nowrap' }}>
+              {uniqueCities.length} Cities
             </div>
           </div>
         </div>
 
-        {/* ── CITY CARDS (ZERO-OVERLAP GOATED GRID) ── */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 36px 36px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 22, alignContent: 'start', scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,212,255,0.3) transparent' }}>
+        {/* ── CITY GRID (Premium Compact Row Cards) ── */}
+        <div style={{
+          flex: 1, overflowY: 'auto', padding: '4px 36px 24px',
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+          gap: 10, alignContent: 'start',
+          scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,212,255,0.3) transparent'
+        }}>
           {loading ? (
             <div style={{ gridColumn: '1/-1', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, color: 'rgba(160,200,230,0.5)', padding: 80 }}>
               <div className="spinner" /><span>Loading city networks...</span>
@@ -327,21 +333,18 @@ export default function Landing({ onSelectCity }: Props) {
             <div style={{ gridColumn: '1/-1', padding: '50px', textAlign: 'center' }}>
               <div style={{ fontSize: 42, marginBottom: 14 }}>⚠️</div>
               <div style={{ fontWeight: 700, color: '#ff3b6b', marginBottom: 10, fontSize: 16 }}>{error}</div>
-              <div style={{ fontSize: 12, color: 'rgba(160,200,230,0.5)' }}>Run: <code style={{ color: '#00d4ff', background: 'rgba(0,212,255,0.1)', padding: '2px 8px', borderRadius: 4 }}>npm start</code> in the backend-ts folder</div>
             </div>
-          ) : cities
+          ) : uniqueCities
               .filter(c => {
                 if (!searchQuery.trim()) return true;
                 const q = searchQuery.toLowerCase();
-                return c.name.toLowerCase().includes(q) ||
-                       c.subtitle.toLowerCase().includes(q) ||
-                       c.id.toLowerCase().includes(q) ||
-                       (c as any).state?.toLowerCase().includes(q);
+                return c.name.toLowerCase().includes(q) || c.subtitle.toLowerCase().includes(q) || c.id.toLowerCase().includes(q);
               })
               .map(city => {
             const [healthText, healthColor] = healthBadge(city.avg_rci);
             const isLoading = loadingCity === city.id;
             const isHovered = hoveredCity === city.id;
+            const rciFill = Math.min(100, city.avg_rci);
             return (
               <div
                 key={city.id}
@@ -350,88 +353,64 @@ export default function Landing({ onSelectCity }: Props) {
                 onMouseLeave={() => setHoveredCity(null)}
                 style={{
                   background: isLoading
-                    ? `radial-gradient(ellipse at top, ${city.theme}20 0%, rgba(6,12,24,0.95) 70%)`
+                    ? `linear-gradient(135deg, ${city.theme}18 0%, rgba(6,12,28,0.97) 100%)`
                     : isHovered
-                    ? `radial-gradient(ellipse at top, ${city.theme}15 0%, rgba(12,22,40,0.9) 80%)`
-                    : 'rgba(12,20,38,0.6)',
-                  border: `1px solid ${isLoading ? city.theme + '80' : isHovered ? city.theme + '50' : 'rgba(255,255,255,0.09)'}`,
-                  borderRadius: 20, padding: '22px', cursor: loadingCity ? 'default' : 'pointer',
-                  transition: 'all 0.3s cubic-bezier(0.34,1.2,0.64,1)',
-                  transform: isLoading ? 'translateY(-6px) scale(1.02)' : isHovered ? 'translateY(-5px)' : 'translateY(0)',
-                  boxShadow: isLoading ? `0 20px 60px ${city.theme}30, 0 0 0 1px ${city.theme}40` : isHovered ? `0 15px 45px rgba(0,0,0,0.6), 0 0 30px ${city.theme}20` : '0 6px 25px rgba(0,0,0,0.35)',
-                  position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'space-between'
+                    ? `linear-gradient(135deg, ${city.theme}12 0%, rgba(10,18,36,0.95) 100%)`
+                    : 'rgba(8,15,30,0.75)',
+                  border: `1px solid ${isLoading ? city.theme + '90' : isHovered ? city.theme + '55' : 'rgba(255,255,255,0.08)'}`,
+                  borderRadius: 14, padding: '14px 16px', cursor: loadingCity ? 'default' : 'pointer',
+                  transition: 'all 0.25s cubic-bezier(0.34,1.2,0.64,1)',
+                  transform: isHovered && !isLoading ? 'translateY(-2px)' : 'translateY(0)',
+                  boxShadow: isLoading
+                    ? `0 12px 40px ${city.theme}25, 0 0 0 1px ${city.theme}40`
+                    : isHovered
+                    ? `0 8px 30px rgba(0,0,0,0.5), 0 0 20px ${city.theme}15`
+                    : '0 3px 15px rgba(0,0,0,0.3)',
+                  position: 'relative', overflow: 'hidden',
+                  display: 'flex', flexDirection: 'column', gap: 10,
                 }}
               >
-                {/* Top accent glow bar */}
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, transparent, ${city.theme}, transparent)`, opacity: isHovered || isLoading ? 1 : 0.4, transition: 'opacity 0.3s' }} />
+                {/* Top accent */}
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, transparent, ${city.theme}, transparent)`, opacity: isHovered || isLoading ? 1 : 0.5, transition: 'opacity 0.3s' }} />
 
+                {/* Row 1: emoji + name + health badge */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 10, background: `${city.theme}18`, border: `1px solid ${city.theme}45`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                    {city.emoji}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 16, color: city.theme, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: `0 0 10px ${city.theme}50` }}>
+                      {city.name}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'rgba(160,200,230,0.5)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{city.subtitle}</div>
+                  </div>
+                  <div style={{ background: `${healthColor as string}18`, border: `1px solid ${healthColor as string}50`, color: healthColor as string, borderRadius: 8, padding: '3px 10px', fontSize: 10, fontWeight: 800, letterSpacing: 1, flexShrink: 0 }}>
+                    {healthText}
+                  </div>
+                </div>
+
+                {/* Row 2: RCI bar + stats inline */}
                 <div>
-                  {/* Card header */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
-                      <div style={{ width: 48, height: 48, borderRadius: 14, background: `${city.theme}15`, border: `1px solid ${city.theme}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, flexShrink: 0, boxShadow: `0 4px 12px ${city.theme}15` }}>
-                        {city.emoji}
-                      </div>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 19, color: city.theme, marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: `0 0 12px ${city.theme}40` }}>
-                          {city.name}
-                        </div>
-                        <div style={{ fontSize: 11, color: 'rgba(180,215,245,0.6)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {city.subtitle}
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ background: `${healthColor as string}15`, border: `1px solid ${healthColor as string}40`, color: healthColor as string, borderRadius: 10, padding: '5px 12px', fontSize: 11, fontWeight: 800, letterSpacing: 1, flexShrink: 0, boxShadow: `0 0 10px ${healthColor as string}20` }}>
-                      {healthText}
-                    </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                    <span style={{ fontSize: 10, color: 'rgba(160,200,230,0.5)', fontWeight: 700, letterSpacing: 0.5 }}>RCI SCORE</span>
+                    <span style={{ fontSize: 10, fontWeight: 900, color: rciColor(city.avg_rci), fontFamily: 'Space Grotesk' }}>{city.avg_rci}%</span>
                   </div>
-                  {/* Boundary & GeoAI verification tag */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, color: 'rgba(0,212,255,0.85)', background: 'rgba(0,212,255,0.08)', padding: '5px 10px', borderRadius: 8, border: '1px solid rgba(0,212,255,0.18)' }}>
-                      <span>🗺️</span> Official OSM Municipal MultiPolygon Clipped
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, color: '#00ff9d', background: 'rgba(0,255,157,0.08)', padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(0,255,157,0.2)' }}>
-                      <span>🛡️</span> National Digital Twin · GeoAI Shield Ready
-                    </div>
+                  {/* 5-tier color bar */}
+                  <div style={{ height: 5, background: 'rgba(255,255,255,0.07)', borderRadius: 4, overflow: 'hidden', marginBottom: 8 }}>
+                    <div style={{ width: `${rciFill}%`, height: '100%', background: `linear-gradient(90deg, #ff2850, #ff8c00 40%, #ffd200 70%, #00ff9d 100%)`, backgroundSize: '200% 100%', backgroundPositionX: `${100 - rciFill}%`, borderRadius: 4, boxShadow: `0 0 8px ${rciColor(city.avg_rci)}60`, transition: 'width 1s ease' }} />
                   </div>
-
-                  {/* RCI bar */}
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 11 }}>
-                      <span style={{ color: 'rgba(180,215,245,0.7)', textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 700 }}>Avg RCI Condition Score</span>
-                    </div>
-                    <RciBar pct={city.avg_rci} color={rciColor(city.avg_rci)} />
-                  </div>
-
-                  {/* Stats grid */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+                  {/* Inline stats */}
+                  <div style={{ display: 'flex', gap: 8 }}>
                     {[
-                      { l: 'Roads Monitored', v: city.total_roads.toLocaleString(), c: '#00d4ff' },
-                      { l: 'Critical Risks',  v: city.critical_roads, c: city.critical_roads > 30 ? '#ff3b6b' : '#ffd93d' },
-                      { l: 'Pending Action',  v: city.pending_repairs, c: 'rgba(190,225,255,0.8)' },
-                      { l: 'Budget Utilized', v: `${city.budget_utilized_pct}%`, c: '#00ff9d' },
+                      { l: 'Roads', v: city.total_roads.toLocaleString(), c: '#00d4ff' },
+                      { l: 'Critical', v: city.critical_roads, c: city.critical_roads > 30 ? '#ff2850' : '#ffd200' },
+                      { l: 'Budget', v: `${city.budget_utilized_pct}%`, c: '#00ff9d' },
                     ].map(item => (
-                      <div key={item.l} style={{ background: 'rgba(255,255,255,0.035)', borderRadius: 12, padding: '10px 14px', border: '1px solid rgba(255,255,255,0.07)', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.3)' }}>
-                        <div style={{ fontSize: 10, color: 'rgba(160,200,230,0.5)', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4, fontWeight: 700 }}>{item.l}</div>
-                        <div style={{ fontSize: 17, fontWeight: 900, fontFamily: 'Space Grotesk', color: item.c }}>{item.v}</div>
+                      <div key={item.l} style={{ flex: 1, background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', textAlign: 'center' }}>
+                        <div style={{ fontSize: 9, color: 'rgba(160,200,230,0.45)', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>{item.l}</div>
+                        <div style={{ fontSize: 13, fontWeight: 900, fontFamily: 'Space Grotesk', color: item.c }}>{item.v}</div>
                       </div>
                     ))}
-                  </div>
-
-                  {/* Budget utilization meter */}
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ height: 5, background: 'rgba(255,255,255,0.08)', borderRadius: 4, overflow: 'hidden' }}>
-                      <div style={{ width: `${city.budget_utilized_pct}%`, height: '100%', background: `linear-gradient(90deg, ${city.theme}, ${city.theme}88)`, borderRadius: 4, boxShadow: `0 0 10px ${city.theme}` }} />
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'rgba(160,200,230,0.45)', marginTop: 6, fontWeight: 600 }}>
-                      <span>Budget Utilization Rate</span>
-                      <span style={{ color: '#fff', fontWeight: 700 }}>{city.budget_utilized_pct}%</span>
-                    </div>
-                  </div>
-
-                  {/* Last survey timestamp */}
-                  <div style={{ fontSize: 11, color: 'rgba(160,200,230,0.45)', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>🛰️</span> Last Survey: <span style={{ color: 'rgba(0,255,157,0.8)', fontFamily: 'monospace', fontWeight: 700 }}>{city.last_survey}</span>
                   </div>
                 </div>
 
@@ -440,18 +419,18 @@ export default function Landing({ onSelectCity }: Props) {
                   onClick={e => { e.stopPropagation(); if (!loadingCity) handleSelect(city); }}
                   disabled={!!loadingCity}
                   style={{
-                    width: '100%', padding: '14px 0',
-                    background: isLoading ? `${city.theme}30` : `linear-gradient(135deg, ${city.theme}30 0%, ${city.theme}15 100%)`,
-                    border: `1px solid ${city.theme}${isHovered || isLoading ? '90' : '50'}`,
-                    color: '#ffffff', borderRadius: 14, fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 14,
+                    width: '100%', padding: '10px 0',
+                    background: isLoading ? `${city.theme}25` : `linear-gradient(135deg, ${city.theme}28 0%, ${city.theme}12 100%)`,
+                    border: `1px solid ${city.theme}${isHovered || isLoading ? '80' : '40'}`,
+                    color: '#ffffff', borderRadius: 10, fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 13,
                     cursor: loadingCity ? 'not-allowed' : 'pointer', transition: 'all 0.25s',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                    boxShadow: isHovered && !loadingCity ? `0 6px 25px ${city.theme}40` : `0 4px 15px rgba(0,0,0,0.3)`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    boxShadow: isHovered && !loadingCity ? `0 4px 18px ${city.theme}35` : 'none',
                     textShadow: '0 1px 3px rgba(0,0,0,0.6)'
                   }}
                 >
                   {isLoading
-                    ? <><div className="spinner" style={{ borderTopColor: '#ffffff', width: 16, height: 16 }} /> Ingesting Digital Twin...</>
+                    ? <><div className="spinner" style={{ borderTopColor: '#ffffff', width: 14, height: 14 }} /> Ingesting Digital Twin...</>
                     : <><span>▶</span> ENTER {city.name.toUpperCase()}</>
                   }
                 </button>
@@ -461,12 +440,12 @@ export default function Landing({ onSelectCity }: Props) {
         </div>
 
         {/* ── FOOTER ── */}
-        <div style={{ padding: '12px 36px', borderTop: '1px solid rgba(0,212,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(3,8,18,0.7)', backdropFilter: 'blur(20px)', flexShrink: 0 }}>
+        <div style={{ padding: '10px 36px', borderTop: '1px solid rgba(0,212,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(3,8,18,0.8)', backdropFilter: 'blur(20px)', flexShrink: 0 }}>
           <div style={{ fontSize: 11, color: 'rgba(160,200,230,0.35)', letterSpacing: 0.5 }}>
-            RESILIO CITY v3.0 (GOATED) · AI-Powered Infrastructure Resilience & Disaster Planning
+            RESILIO CITY v4.0 · AI Road Detection (YOLOv8 + OSM Overpass) · Admin Border Rendering · 5-Tier Risk Scale
           </div>
-          <div style={{ display: 'flex', gap: 16, fontSize: 11 }}>
-            {[['🟢', 'API Online', '#00ff9d'], ['📡', 'DeckGL Active', '#00d4ff'], ['⚡', 'MCP Ready', '#ffd93d'], ['🧠', 'AI Engine', '#bd93f9']].map(([ic, lb, col]) => (
+          <div style={{ display: 'flex', gap: 14, fontSize: 11 }}>
+            {[['🟢', 'API Online', '#00ff9d'], ['📡', 'DeckGL', '#00d4ff'], ['⚡', 'MCP', '#ffd93d'], ['🤖', 'YOLO Active', '#ffd200'], ['🗺️', 'City Borders', '#00e5ff']].map(([ic, lb, col]) => (
               <span key={lb} style={{ color: col as string }}>{ic} {lb}</span>
             ))}
           </div>
@@ -475,7 +454,7 @@ export default function Landing({ onSelectCity }: Props) {
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes pulseGlow { 0%, 100% { opacity: 1; box-shadow: 0 0 6px currentColor; } 50% { opacity: 0.5; box-shadow: 0 0 14px currentColor; } }
       `}</style>
     </div>
   );

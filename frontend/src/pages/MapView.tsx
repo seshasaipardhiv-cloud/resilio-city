@@ -16,9 +16,16 @@ const HAZARD_EMOJIS: Record<string, string> = {
 };
 
 function rciColor(rci: number, failProb: number): [number,number,number,number] {
-  if (failProb >= 0.70 || rci <= 35) return [255, 59, 107, 255]; // Critical / Damaged (Red)
-  if (failProb >= 0.35 || rci <= 65) return [255, 180, 40, 235]; // Moderate / Vulnerable (Orange/Yellow)
-  return [0, 255, 157, 220]; // Healthy Pristine (Bright Green)
+  // Critical — red
+  if (failProb >= 0.65 || rci <= 30) return [255, 40, 80, 255];
+  // High risk — orange-red
+  if (failProb >= 0.45 || rci <= 50) return [255, 100, 30, 245];
+  // Moderate — vivid yellow (this was getting skipped before)
+  if (failProb >= 0.25 || rci <= 70) return [255, 210, 0, 240];
+  // Good — lime green
+  if (rci <= 85) return [120, 255, 80, 230];
+  // Excellent — bright green
+  return [0, 255, 157, 220];
 }
 
 const SVC_COLORS: Record<string,[number,number,number]> = {
@@ -67,6 +74,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   const [showLegend, setShowLegend] = useState(true);
   const [showTwinStatus, setShowTwinStatus] = useState(true);
   const [geoProfile, setGeoProfile] = useState<any>(null);
+  const [cityBoundary, setCityBoundary] = useState<[number,number][] | null>(null);
 
   // ── Production GIS & Three.js Pipeline State (STEP 6, 8, 9, 11, 12, 13) ──
   const [mapError, setMapError] = useState<string | null>(null);
@@ -288,6 +296,13 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           const geoP = await axios.get(`${API}/city/${cityId}/geography`, { timeout: 15000 });
           if (geoP.data) setGeoProfile(geoP.data);
         } catch { /* geo profile fallback */ }
+        // Fetch administrative boundary polygon from OSM cache
+        try {
+          const bdry = await axios.get(`${API}/city/${cityId}/boundary`, { timeout: 15000 });
+          if (bdry.data?.coordinates && Array.isArray(bdry.data.coordinates)) {
+            setCityBoundary(bdry.data.coordinates);
+          }
+        } catch { /* boundary fallback - not critical */ }
       } catch { /* Non-critical telemetry fallback */ }
 
     } catch (err: any) {
@@ -450,9 +465,13 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   const avgRci  = analysis?.average_rci   ?? 0;
   const avgCrit = analysis?.average_criticality ?? 0;
 
+  // NOTE: edges must be in deps so color refreshes after simulation updates features
   const getEdgeColor = useCallback((f: any): [number,number,number,number] => {
-    return rciColor(f.properties?.rci ?? 85, f.properties?.failure_probability ?? 0);
-  }, []);
+    const rci = f.properties?.rci ?? 85;
+    const fp  = f.properties?.failure_probability ?? 0;
+    return rciColor(rci, fp);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edges]);
 
   const rciHist = useMemo(() => [0, 20, 40, 60, 80].map(b => ({
     range: `${b}–${b+20}`,
@@ -635,6 +654,46 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       } as any) as any);
     }
 
+    // ── CITY ADMINISTRATIVE BOUNDARY ── Official municipal border from OSM/govt data
+    if (cityBoundary && cityBoundary.length >= 3) {
+      // Outer glow (wide, low opacity)
+      combined.push(new PathLayer({
+        id: 'city-boundary-glow',
+        data: [{ path: [...cityBoundary, cityBoundary[0]] }],
+        getPath: (d: any) => d.path,
+        getColor: [0, 220, 255, 40],
+        getWidth: 14,
+        widthUnits: 'pixels',
+        capRounded: true, jointRounded: true,
+        pickable: false,
+      }));
+      // Mid glow
+      combined.push(new PathLayer({
+        id: 'city-boundary-mid',
+        data: [{ path: [...cityBoundary, cityBoundary[0]] }],
+        getPath: (d: any) => d.path,
+        getColor: [0, 220, 255, 100],
+        getWidth: 4,
+        widthUnits: 'pixels',
+        capRounded: true, jointRounded: true,
+        pickable: false,
+      }));
+      // Crisp inner line
+      combined.push(new PathLayer({
+        id: 'city-boundary-line',
+        data: [{ path: [...cityBoundary, cityBoundary[0]] }],
+        getPath: (d: any) => d.path,
+        getColor: [0, 255, 240, 220],
+        getWidth: 1.5,
+        widthUnits: 'pixels',
+        capRounded: true, jointRounded: true,
+        pickable: false,
+        getDashArray: [8, 4],
+        dashJustified: true,
+        extensions: [],
+      }));
+    }
+
     // High-Visibility Disaster Resilient Navigation Path
     if (routeData && routeData.polyline && routeData.polyline.length >= 2) {
       const routeSegments = [];
@@ -683,7 +742,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
     }
 
     return combined;
-  }, [baseRoadLayers, edges.length, selectedRoad, dashOffset, showServices, emergencySvcs, routeData, routeMode, baseMapMode]);
+  }, [baseRoadLayers, edges.length, selectedRoad, dashOffset, showServices, emergencySvcs, routeData, routeMode, baseMapMode, cityBoundary]);
 
   // ── Intensity color helper ─────────────────────────────────────────────────
   const intensityColor = intensity >= 0.7 ? '#ff3b6b' : intensity >= 0.35 ? '#ffd93d' : '#00ff9d';
@@ -973,11 +1032,13 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           <div style={{ padding: '14px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(160,200,230,0.7)', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10 }}>🗺 Road Condition Legend</div>
             {[
-              { col: '#00ff9d', label: 'Excellent (RCI > 80)' },
-              { col: '#ffd93d', label: 'Moderate (RCI 50–80)' },
-              { col: '#ff7b35', label: 'Poor (RCI < 50)' },
-              { col: '#ff3b6b', label: 'Critical Failure Risk' },
-              { col: '#00d4ff', label: '● Selected Road' },
+              { col: '#00ff9d', label: 'Excellent (RCI > 85)' },
+              { col: '#78ff50', label: 'Good (RCI 71–85)' },
+              { col: '#ffd200', label: 'Moderate / Medium (RCI 51–70)' },
+              { col: '#ff641e', label: 'Poor (RCI 31–50)' },
+              { col: '#ff2850', label: 'Critical Failure Risk (≤30)' },
+              { col: '#00d4ff', label: '── City Border (OSM/Govt)' },
+              { col: '#00e5ff', label: '● Selected Road' },
             ].map(l => (
               <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 7, fontSize: 12 }}>
                 <div style={{ width: 26, height: 4, background: l.col, borderRadius: 2, boxShadow: `0 0 6px ${l.col}50`, flexShrink: 0 }} />
@@ -988,6 +1049,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
               💡 Click any road for 3D Inspector<br/>⚡ Bottom-right button opens AI Panel
             </div>
           </div>
+
 
           {/* Event Log */}
           <div style={{ padding: '14px', flex: 1 }}>
