@@ -16,7 +16,7 @@ export class HeatwaveModel {
     const timestamp = new Date().toISOString();
 
     // Use live temperature if extreme, otherwise scale scenario intensity
-    const ambientTempC = telemetry.temperature_c > 35 ? telemetry.temperature_c : 35 + (intensity * 15); // Up to 50C
+    const ambientTempC = telemetry.temperature_celsius > 35 ? telemetry.temperature_celsius : 35 + (intensity * 15); // Up to 50C
 
     edges.forEach((edge) => {
       // Surface temperature is typically higher than ambient due to Urban Heat Island (UHI) and albedo

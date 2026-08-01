@@ -42,8 +42,8 @@ export class TrafficIntelligenceEngine {
       provider: selectedProvider,
       congestion_coefficient: Math.round(congestionCoed * 100) / 100,
       travel_time_seconds: travelTimeSeconds,
-      is_road_closed: edge.damage_state !== 'none',
-      closure_reason: edge.damage_state !== 'none' ? `Corridor Status: ${edge.damage_state.toUpperCase()}` : undefined
+      is_road_closed: (edge.damage_state || 'none') !== 'none',
+      closure_reason: (edge.damage_state || 'none') !== 'none' ? `Corridor Status: ${(edge.damage_state || 'none').toUpperCase()}` : undefined
     };
 
     edge.traffic_status = trafficObservation;
@@ -53,7 +53,7 @@ export class TrafficIntelligenceEngine {
     const weatherSpeedImpedance = rainfallMm > 35 ? 0.55 : (rainfallMm > 10 ? 0.75 : 1.0);
 
     edges.forEach((edge) => {
-      if (edge.damage_state !== 'none' || edge.traffic_status?.is_road_closed) {
+      if ((edge.damage_state || 'none') !== 'none' || edge.traffic_status?.is_road_closed) {
         edge.current_speed_kmh = 5; // Emergency clearance creep speed
         edge.travel_time_seconds = Math.round(edge.length_meters * 2.5);
         if (edge.traffic_status) {

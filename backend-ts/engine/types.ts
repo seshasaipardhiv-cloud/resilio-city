@@ -16,6 +16,7 @@ export interface GraphNode {
 export interface SatelliteObservation {
   rainfall_intensity_mm?: number | undefined;
   surface_temp_celsius?: number | undefined;
+  flood_water_depth_m?: number | undefined;
 }
 
 export interface TrafficObservation {
@@ -89,6 +90,8 @@ export interface EnvironmentalTelemetry {
   humidity_percent: number;
   visibility_m?: number | undefined;
   cloud_cover_percent?: number | undefined;
+  soil_moisture_index?: number | undefined;
+  ground_subsidence_mm_yr?: number | undefined;
   weather_alerts?: string[] | undefined;
   is_live_weather?: boolean | undefined;
   source_verification: string;

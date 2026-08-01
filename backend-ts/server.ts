@@ -508,7 +508,7 @@ app.get('/city/road/:id/intelligence', (req: Request, res: Response): void => {
   const road = activeCity.edges.find((e: any) => e.id === paramId || (e.properties && (e.properties.id === paramId || e.properties.osm_id === paramId)));
   if (!road) { res.status(404).json({ detail: 'Road not found.' }); return; }
 
-  const props = road.properties || road;
+  const props = (road as any).properties || road;
   
   // Deterministic calculation
   const rci = props.rci || 85;
@@ -675,7 +675,7 @@ const handleDisasterSim = (req: Request, res: Response): void => {
     structural_stats: simResult.structuralStats,
     geo_intelligence: geoIntelligence,
     cascade_analysis: cascadeAnalysis,
-    edge_updates: activeCity.edges.map(e => ({ id: e.id, failure_probability: e.failure_probability, damage_state: e.damage_state, rci: e.rci, provenance: e.provenance })),
+    edge_updates: activeCity.edges.map(e => ({ id: e.id, failure_probability: e.failure_probability, damage_state: e.damage_state, rci: e.rci, provenance: (e as any).provenance })),
     summary: `${hazard} (${intensityLabel} / ${(intensityValue*100).toFixed(0)}%) on ${activeCity.city_name}: Physics simulation analyzed ${totalEdges} corridors. Affected ${affectedEdgesCount} roads & ${affectedNodes} nodes (${pctLost}% capacity drop). Resilience: ${resScore}/100. Recovery estimate: ~${recoveryTime}h. Est. Budget: ₹${(recoveryPlan.summary.total_estimated_cost_inr/1e7).toFixed(2)} Cr. [GeoAI: ${geoIntelligence.reasoning}]`,
   });
 };

@@ -236,16 +236,16 @@ export class GraphAnalyticsEngine {
         const congestion = e.traffic_status?.congestion_coefficient ?? 1.0;
         cost = time * congestion;
       } else if (mode === 'safest') {
-        cost = time * (1 + (e.failure_probability * 12) + ((100 - (e.rci || 70)) / 15));
+        cost = time * (1 + ((e.failure_probability || 0) * 12) + ((100 - (e.rci || 70)) / 15));
       } else if (mode === 'flood_avoidance') {
         const floodDepth = e.satellite_observations?.flood_water_depth_m ?? 0;
-        if (e.damage_state === 'flooded' || floodDepth > 0.2 || e.flood_vulnerability > 0.75) {
+        if (e.damage_state === 'flooded' || floodDepth > 0.2 || (e.flood_vulnerability || 0) > 0.75) {
           cost = Infinity; // Bypass flooded or severely high-risk inundation corridors
         } else {
           cost = time * (1 + Math.pow((e.flood_vulnerability || 0) * 6, 2));
         }
       } else if (mode === 'earthquake_safe') {
-        if (e.is_bridge && e.earthquake_vulnerability > 0.5) {
+        if (e.is_bridge && (e.earthquake_vulnerability || 0) > 0.5) {
           cost = time * 25; // Heavily penalize seismic bridge bottlenecks
         } else {
           cost = time * (1 + Math.pow((e.earthquake_vulnerability || 0) * 5, 2) + (e.is_bridge ? 4 : 0));
@@ -331,7 +331,7 @@ export class GraphAnalyticsEngine {
       totalDist += e.length_meters || 0;
       totalTime += e.travel_time_seconds || 0;
       totalRci += e.rci || 70;
-      if ((e.failure_probability || 0) > maxFail) maxFail = e.failure_probability;
+      if ((e.failure_probability || 0) > maxFail) maxFail = (e.failure_probability || 0);
       hazardScore += (e.failure_probability || 0) * 10 + ((100 - (e.rci || 70)) / 10);
 
       if (e.polyline && e.polyline.length > 0) {

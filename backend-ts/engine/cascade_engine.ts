@@ -1,4 +1,5 @@
 import { GeographicProfile } from './geographic_intelligence.js';
+import { GraphNode, GraphEdge } from './types.js';
 
 /**
  * Production Cascade Simulation & AI Explanation Engine
@@ -217,6 +218,8 @@ export class CascadeSimulationEngine {
         'Copernicus Sentinel Remote Sensing Telemetry'
       ]
     };
+  }
+
   public static executeCascades(
     nodes: Record<string, GraphNode>,
     edges: GraphEdge[],
