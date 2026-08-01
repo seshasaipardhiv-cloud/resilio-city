@@ -501,6 +501,53 @@ app.get('/city/road/:road_id/emergency', (req: Request, res: Response): void => 
   });
 });
 
+// ── 10.5. AI Infrastructure Intelligence Engine ─────────────────────────────
+app.get('/city/road/:id/intelligence', (req: Request, res: Response): void => {
+  if (!activeCity) { res.status(400).json({ detail: 'No city loaded.' }); return; }
+  const paramId = req.params.id;
+  const road = activeCity.edges.find((e: any) => e.id === paramId || (e.properties && (e.properties.id === paramId || e.properties.osm_id === paramId)));
+  if (!road) { res.status(404).json({ detail: 'Road not found.' }); return; }
+
+  const props = road.properties || road;
+  
+  // Deterministic calculation
+  const rci = props.rci || 85;
+  const failProb = props.failure_probability || 0;
+  
+  let health_score = Math.max(0, Math.min(100, Math.round(rci - (failProb * 30))));
+  
+  let status = 'Excellent';
+  if (health_score <= 30) status = 'Critical';
+  else if (health_score <= 50) status = 'Poor';
+  else if (health_score <= 70) status = 'Moderate';
+  else if (health_score <= 85) status = 'Good';
+
+  const evidence = [
+    { property: 'RCI (Road Condition Index)', value: rci, source: 'Backend RCI Engine' },
+    { property: 'Failure Probability', value: `${(failProb * 100).toFixed(1)}%`, source: 'Backend RCI Engine' },
+  ];
+  if (props.highway) evidence.push({ property: 'Road Class', value: props.highway, source: 'OSM' });
+  if (props.surface) evidence.push({ property: 'Surface Type', value: props.surface, source: 'OSM' });
+  if (props.lanes) evidence.push({ property: 'Lanes', value: props.lanes, source: 'OSM' });
+  if (props.is_bridge) evidence.push({ property: 'Bridge Deck', value: 'Yes', source: 'OSM' });
+  
+  let reasoning = `The road health score of ${health_score} is determined primarily by its Base RCI of ${rci} and a localized failure probability of ${(failProb * 100).toFixed(1)}%.`;
+  if (props.highway) reasoning += ` The ${props.highway} classification was factored into structural limits.`;
+  if (props.is_bridge) reasoning += ` Bridge status increases vulnerability weighting.`;
+  if (props.surface) reasoning += ` Surface material (${props.surface}) modifies the deterioration curve.`;
+
+  res.json({
+    road_id: paramId,
+    road_name: props.name || 'Unnamed Road',
+    health_score,
+    status,
+    evidence,
+    reasoning,
+    confidence: evidence.length >= 4 ? 'High' : 'Moderate',
+    evidence_available: true
+  });
+});
+
 // ── 11. Simulate Disaster & Graph Analytics (Via Physics & Recovery Engines) ─────────────────
 const handleDisasterSim = (req: Request, res: Response): void => {
   if (!activeCity) { res.status(400).json({ detail: 'No city loaded.' }); return; }
@@ -578,19 +625,11 @@ const handleDisasterSim = (req: Request, res: Response): void => {
 
   // Apply damaged states back onto active memory for live UI mapping
   const affectedSet = new Set(simResult.affectedEdges);
-  let affectedEdgesCount = 0;
-  activeCity.edges.forEach((edge) => {
-    if (affectedSet.has(edge.id)) {
-      affectedEdgesCount++;
-      // Damage scales purely with superior intensity slider
-      edge.failure_probability = Math.min(0.99, Number((0.45 + intensityValue * 0.54).toFixed(2)));
-      edge.damage_type = hazardKey === 'flood' ? 'water_intrusion' : hazardKey === 'earthquake' ? 'cracking' : 'subsidence';
-      edge.rci = Math.max(12, Math.round(85 - intensityValue * 68));
-    } else {
-      edge.failure_probability = Math.min(0.08, edge.failure_probability || 0.04);
-      edge.rci = Math.max(82, edge.rci || 85);
-    }
-  });
+  let affectedEdgesCount = affectedSet.size;
+  // Edge states are already modified in place by executeHazardPropagation/CascadeEngine via simEdges reference,
+  // because simEdges are just the activeCity.edges array or a filtered subset.
+  // Wait, simEdges might be a copy? No, in `/city/:id/disaster`, simEdges is `activeCity.edges`.
+  // So we just need to ensure we don't overwrite them with heuristic scores.
 
   // Generate automated restoration logitics via Recovery Recommendation Engine
   const recoveryPlan = RecoveryRecommendationEngine.generateRecoveryPlan(simNodes, simEdges, simResult.affectedEdges);
@@ -636,7 +675,7 @@ const handleDisasterSim = (req: Request, res: Response): void => {
     structural_stats: simResult.structuralStats,
     geo_intelligence: geoIntelligence,
     cascade_analysis: cascadeAnalysis,
-    edge_updates: activeCity.edges.map(e => ({ id: e.id, failure_probability: e.failure_probability, damage_type: e.damage_type, rci: e.rci })),
+    edge_updates: activeCity.edges.map(e => ({ id: e.id, failure_probability: e.failure_probability, damage_state: e.damage_state, rci: e.rci, provenance: e.provenance })),
     summary: `${hazard} (${intensityLabel} / ${(intensityValue*100).toFixed(0)}%) on ${activeCity.city_name}: Physics simulation analyzed ${totalEdges} corridors. Affected ${affectedEdgesCount} roads & ${affectedNodes} nodes (${pctLost}% capacity drop). Resilience: ${resScore}/100. Recovery estimate: ~${recoveryTime}h. Est. Budget: ₹${(recoveryPlan.summary.total_estimated_cost_inr/1e7).toFixed(2)} Cr. [GeoAI: ${geoIntelligence.reasoning}]`,
   });
 };

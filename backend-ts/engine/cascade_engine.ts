@@ -217,5 +217,59 @@ export class CascadeSimulationEngine {
         'Copernicus Sentinel Remote Sensing Telemetry'
       ]
     };
+  public static executeCascades(
+    nodes: Record<string, GraphNode>,
+    edges: GraphEdge[],
+    primaryAffectedEdgeIds: string[],
+    currentStep: number
+  ): void {
+    const affectedSet = new Set(primaryAffectedEdgeIds);
+
+    // Build adjacency list for fast propagation
+    const adj: Map<string, string[]> = new Map();
+    edges.forEach((e) => {
+      if (!adj.has(e.source)) adj.set(e.source, []);
+      if (!adj.has(e.target)) adj.set(e.target, []);
+      adj.get(e.source)?.push(e.id);
+      adj.get(e.target)?.push(e.id);
+    });
+
+    edges.forEach((edge) => {
+      // Skip already primarily affected edges
+      if (affectedSet.has(edge.id) || (edge.damage_state !== 'none' && edge.damage_state !== null)) return;
+
+      // Check if adjacent to a severed/blocked edge
+      const adjacentEdgesIds = [
+        ...(adj.get(edge.source) || []),
+        ...(adj.get(edge.target) || [])
+      ];
+
+      let severedNeighbors = 0;
+      adjacentEdgesIds.forEach(adjId => {
+        if (adjId !== edge.id && affectedSet.has(adjId)) {
+          severedNeighbors++;
+        }
+      });
+
+      // Secondary bottleneck cascade
+      if (severedNeighbors > 0) {
+        let cascadeSeverity = severedNeighbors * 0.3; // 30% congestion per blocked neighbor
+        if (cascadeSeverity > 1.0) cascadeSeverity = 1.0;
+
+        // Apply secondary damage state (obstructed represents severe congestion/blockage)
+        if (cascadeSeverity > 0.5) {
+          edge.damage_state = 'obstructed';
+          edge.current_speed_kmh = Math.round(edge.speed_limit_kmh * 0.1); // crawling traffic
+          edge.failure_probability = cascadeSeverity;
+          edge.rci = Math.max(10, (edge.rci || 70) - 20);
+
+          if (!edge.traffic_status) edge.traffic_status = {};
+          edge.traffic_status.congestion_coefficient = 3.5;
+          edge.traffic_status.is_road_closed = false;
+          
+          affectedSet.add(edge.id); // Add to affected set for next cascade step
+        }
+      }
+    });
   }
 }

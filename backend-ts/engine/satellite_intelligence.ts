@@ -10,7 +10,7 @@ import { TTLCacheManager } from './cache_manager.js';
  */
 export class SatelliteIntelligenceEngine {
   public static async fetchTelemetry(cityId: string, lat: number, lon: number): Promise<EnvironmentalTelemetry> {
-    const cacheKey = `sat_telemetry_v2_${cityId}`;
+    const cacheKey = `meteo_telemetry_v2_${cityId}`;
     const cached = TTLCacheManager.get<EnvironmentalTelemetry>(cacheKey);
     if (cached) {
       return cached;
@@ -38,25 +38,21 @@ export class SatelliteIntelligenceEngine {
         pressure_hpa: current.surface_pressure !== undefined ? Number(current.surface_pressure) : 1010.5,
         wind_speed_kmh: wind,
         humidity_percent: current.relative_humidity_2m !== undefined ? Number(current.relative_humidity_2m) : (isCoastal ? 78 : 52),
-        soil_moisture_index: isCoastal ? 0.48 : 0.28, // Copernicus Sentinel-1 radar soil saturation index
-        ground_subsidence_mm_yr: cityId === 'nova_delhi' ? -3.8 : -1.8, // InSAR interferometric subsidence rate
-        ndvi_index: cityId === 'cyber_bangalore' ? 0.54 : 0.38, // NASA Landsat 8/9 Vegetation index
-        flood_extent_sq_m: 0.0,
         visibility_m: current.visibility !== undefined ? Number(current.visibility) : 10000,
         cloud_cover_percent: current.cloud_cover !== undefined ? Number(current.cloud_cover) : 25,
         weather_alerts: alerts,
         is_live_weather: true,
-        source_verification: "OPEN_METEO_LIVE_AND_COPERNICUS_SENTINEL_AND_NASA_LANDSAT",
+        source_verification: "OPEN_METEO_API_V1",
         timestamp: new Date().toISOString(),
       };
 
       TTLCacheManager.set(cacheKey, telemetry, 300); // 5 min TTL
       return telemetry;
     } catch (error: any) {
-      console.warn(`[Satellite Intelligence Warning] Open-Meteo live feed unreachable (${error.message}). Switching to verified Copernicus historical cache.`);
+      console.warn(`[Meteorological Engine Warning] Open-Meteo live feed unreachable (${error.message}). Switching to offline baseline.`);
       const failover = TTLCacheManager.getFailover<EnvironmentalTelemetry>(cacheKey);
       if (failover) {
-        return { ...failover, timestamp: new Date().toISOString(), is_live_weather: false, weather_alerts: ["ℹ️ No Live Data (Offline Historical Failover)"], source_verification: "COPERNICUS_OFFLINE_FAILOVER_CACHE" };
+        return { ...failover, timestamp: new Date().toISOString(), is_live_weather: false, weather_alerts: ["ℹ️ No Live Data (Offline Historical Failover)"], source_verification: "OFFLINE_FAILOVER_CACHE" };
       }
 
       const backupTelemetry: EnvironmentalTelemetry = {
@@ -65,15 +61,11 @@ export class SatelliteIntelligenceEngine {
         pressure_hpa: 1009.8,
         wind_speed_kmh: 18.5,
         humidity_percent: cityId === 'coastal_mumbai' ? 78 : 55,
-        soil_moisture_index: cityId === 'coastal_mumbai' ? 0.65 : 0.25,
-        ground_subsidence_mm_yr: cityId === 'nova_delhi' ? -3.4 : -1.5,
-        ndvi_index: cityId === 'cyber_bangalore' ? 0.58 : 0.38,
-        flood_extent_sq_m: 0.0,
         visibility_m: 10000,
         cloud_cover_percent: 30,
         weather_alerts: ["ℹ️ No Live Data (Verified Historic Baseline)"],
         is_live_weather: false,
-        source_verification: "COPERNICUS_VERIFIED_HISTORIC_BASELINE",
+        source_verification: "VERIFIED_HISTORIC_BASELINE",
         timestamp: new Date().toISOString(),
       };
       TTLCacheManager.set(cacheKey, backupTelemetry, 600);
@@ -82,7 +74,7 @@ export class SatelliteIntelligenceEngine {
   }
 
   /**
-   * Attach localized Copernicus Sentinel & NASA Landsat satellite observations to adjacent road segments
+   * Attach localized meteorological observations to adjacent road segments
    */
   public static attachObservationsToEdges(
     edges: GraphEdge[],
@@ -92,20 +84,15 @@ export class SatelliteIntelligenceEngine {
     const isCoastal = cityId === 'coastal_mumbai' || cityId === 'techno_hyderabad';
 
     edges.forEach((edge) => {
-      // Differentiate surface temperature and soil moisture retention based on road material and structural bridge type
       const isBridge = edge.is_bridge || edge.type === 'bridge_deck' || edge.type === 'flyover';
       const surfaceTempDelta = isBridge ? 2.5 : (edge.surface === 'concrete' ? 1.2 : 3.8); // Asphalt thermal retention
-      const moistureFactor = edge.surface === 'unpaved' ? 1.4 : (isBridge ? 0.2 : 1.0);
 
       edge.satellite_observations = {
-        soil_moisture_index: Math.min(1.0, Math.round((telemetry.soil_moisture_index * moistureFactor) * 100) / 100),
-        flood_water_depth_m: telemetry.rainfall_mm > 45 && !isBridge ? (isCoastal ? 0.45 : 0.25) : 0.0,
-        insar_subsidence_mm_yr: isBridge ? Math.round((telemetry.ground_subsidence_mm_yr * 1.5) * 10) / 10 : telemetry.ground_subsidence_mm_yr,
         surface_temp_celsius: Math.round((telemetry.temperature_celsius + surfaceTempDelta) * 10) / 10,
         rainfall_intensity_mm: telemetry.rainfall_mm
       };
     });
 
-    console.log(`[Satellite Intelligence Engine] Attached Copernicus Sentinel & NASA Landsat observations across ${edges.length} corridors.`);
+    console.log(`[Meteorological Engine] Attached weather observations across ${edges.length} corridors.`);
   }
 }

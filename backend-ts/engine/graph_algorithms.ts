@@ -147,15 +147,50 @@ export class GraphAnalyticsEngine {
   }
 
   /**
-   * Calculates network Betweenness Centrality to rank structural bottleneck road segments
+   * Calculates approximated Betweenness Centrality using k-sample shortest paths
+   * to rank structural bottleneck road segments without relying on heuristic formulas.
    */
-  public static rankCriticalRoads(edges: GraphEdge[]): GraphEdge[] {
-    // Return edges sorted descending by criticality composite score (volume * vulnerability / rci)
-    return [...edges].sort((a, b) => {
-      const scoreA = (a.traffic_volume_vph / Math.max(1, a.rci)) * (1 + a.failure_probability);
-      const scoreB = (b.traffic_volume_vph / Math.max(1, b.rci)) * (1 + b.failure_probability);
-      return scoreB - scoreA;
-    });
+  public static rankCriticalRoads(nodes: Record<string, GraphNode>, edges: GraphEdge[]): GraphEdge[] {
+    const nodeKeys = Object.keys(nodes);
+    if (nodeKeys.length < 2 || edges.length === 0) return [...edges];
+
+    // Initialize betweenness score for each edge
+    const betweenness = new Map<string, number>();
+    edges.forEach(e => betweenness.set(e.id, 0));
+
+    // Determine number of samples (k) based on graph size to balance accuracy and latency
+    const k = Math.min(500, Math.floor(nodeKeys.length * 0.1));
+
+    for (let i = 0; i < k; i++) {
+      // Pick random source and target
+      const sIdx = Math.floor(Math.random() * nodeKeys.length);
+      let tIdx = Math.floor(Math.random() * nodeKeys.length);
+      while (tIdx === sIdx && nodeKeys.length > 1) {
+        tIdx = Math.floor(Math.random() * nodeKeys.length);
+      }
+
+      const sNode = nodeKeys[sIdx]!;
+      const tNode = nodeKeys[tIdx]!;
+
+      // Run shortest path based on travel time
+      const { path } = GraphAnalyticsEngine.shortestPath(sNode, tNode, nodes, edges);
+      
+      // Increment centrality count for edges along the path
+      if (path.length > 1) {
+        for (let j = 0; j < path.length - 1; j++) {
+          const u = path[j];
+          const v = path[j+1];
+          // Find the edge connecting u and v
+          const edge = edges.find(e => (e.source === u && e.target === v) || (e.source === v && e.target === u));
+          if (edge) {
+            betweenness.set(edge.id, (betweenness.get(edge.id) || 0) + 1);
+          }
+        }
+      }
+    }
+
+    // Return edges sorted descending by betweenness centrality score
+    return [...edges].sort((a, b) => (betweenness.get(b.id) || 0) - (betweenness.get(a.id) || 0));
   }
 
   /**

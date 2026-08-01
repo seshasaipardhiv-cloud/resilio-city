@@ -563,7 +563,8 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
     }
   }, [view, p.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hasCritical = p.damage_type && p.damage_type !== 'none';
+  const dmgState = p.damage_state || p.damage_type || 'none';
+  const hasCritical = dmgState !== 'none';
   const critPts = hasCritical ? [
     { x: 0.25, y: 0.3, label: 'CP-01' },
     { x: 0.6,  y: 0.65, label: 'CP-02' },
@@ -592,9 +593,9 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
         const scale = 22;
         draw3DRoadBlock(ctx, W/2, H/2, scale, rotRef.current.rx, rotRef.current.ry, ph, hasCritical, p);
       } else if (view === 'crosssection') {
-        drawCrossSection(ctx, W, H, pavement, p.damage_type ?? 'none', ph, p);
+        drawCrossSection(ctx, W, H, pavement, dmgState, ph, p);
       } else if (view === 'elevation') {
-        drawElevation(ctx, W, H, p.road_age ?? 5, p.damage_type ?? 'none', ph, p);
+        drawElevation(ctx, W, H, p.road_age ?? 5, dmgState, ph, p);
       }
 
       animRef.current = requestAnimationFrame(render);
@@ -605,7 +606,7 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
   }, [view, p, hasCritical]); // Expanded dependencies so canvas updates immediately when road properties change!
 
   const rciColor = (rci: number) => rci >= 75 ? 'var(--green)' : rci >= 50 ? 'var(--yellow)' : 'var(--red)';
-  const dmgCol = DAMAGE_COLORS[p.damage_type ?? 'none'] ?? 'var(--green)';
+  const dmgCol = DAMAGE_COLORS[dmgState] ?? 'var(--green)';
 
   const views: { id: ViewMode; label: string; icon: string }[] = [
     { id: 'stations',     label: '360° 3D Network Node', icon: '🌐' },
@@ -686,9 +687,42 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
             <div style={{ background: `${dmgCol}15`, border: `1px solid ${dmgCol}50`, borderRadius: '14px', padding: '14px', boxShadow: `0 0 20px ${dmgCol}15` }}>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4, fontWeight: 700 }}>Primary Damage Status</div>
               <div style={{ fontWeight: 800, fontSize: 16, color: dmgCol, fontFamily: 'Space Grotesk' }}>
-                {(p.damage_type ?? 'None').replace(/_/g, ' ').toUpperCase()}
+                {dmgState.replace(/_/g, ' ').toUpperCase()}
               </div>
             </div>
+
+            {/* Provenance Metadata Box */}
+            {p.provenance && (
+              <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px dashed rgba(255, 255, 255, 0.1)', borderRadius: '14px', padding: '14px' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>🔬</span> Scientific Provenance
+                </div>
+                
+                <div style={{ marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Model: </span>
+                  <span style={{ fontSize: 11, color: '#00d4ff', fontFamily: 'var(--font-mono)' }}>{p.provenance.model_name} v{p.provenance.version}</span>
+                </div>
+                
+                <div style={{ marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Confidence: </span>
+                  <span style={{ fontSize: 11, color: '#fff', fontFamily: 'var(--font-mono)' }}>{p.provenance.confidence_pct}%</span>
+                </div>
+                
+                <div style={{ marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Validation: </span>
+                  <span style={{ fontSize: 11, color: 'var(--yellow)', fontFamily: 'var(--font-mono)' }}>{p.provenance.validation_metrics?.value || 'Uncalibrated'}</span>
+                </div>
+                
+                {p.provenance.limitations && p.provenance.limitations.length > 0 && (
+                  <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 8 }}>
+                    <span style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600 }}>⚠ Known Limitations:</span>
+                    <ul style={{ paddingLeft: 12, margin: '4px 0 0 0', fontSize: 10, color: 'rgba(255,255,255,0.6)', listStyleType: 'circle' }}>
+                      {p.provenance.limitations.map((lim: string, i: number) => <li key={i} style={{ marginBottom: 2 }}>{lim}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Multi-Modal Routing Triggers */}
             <div style={{ display: 'flex', gap: '8px', width: '100%' }}>

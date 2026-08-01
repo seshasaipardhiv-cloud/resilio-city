@@ -36,8 +36,8 @@ export class RecoveryRecommendationEngine {
       : "CRITICAL_ISOLATION_DETECTED";
 
     // Filter and order critical damaged road components
-    const damagedEdges = edges.filter((e) => affectedSet.has(e.id) || e.damage_state !== 'none' || e.rci < 45);
-    const sortedDamaged = GraphAnalyticsEngine.rankCriticalRoads(damagedEdges);
+    const damagedEdges = edges.filter((e) => affectedSet.has(e.id) || e.damage_state !== 'none' || (e.rci && e.rci < 45));
+    const sortedDamaged = GraphAnalyticsEngine.rankCriticalRoads(nodes, damagedEdges);
 
     sortedDamaged.forEach((edge, index) => {
       let phase: 'Emergency Clearance' | 'Structural Stabilization' | 'Full Reconstruction' = 'Emergency Clearance';

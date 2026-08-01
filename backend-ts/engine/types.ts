@@ -1,5 +1,5 @@
 export type NodeType = 'intersection' | 'bridge' | 'tunnel' | 'roundabout' | 'traffic_signal' | 'hospital' | 'clinic' | 'pharmacy' | 'nursing_home' | 'fire_station' | 'police' | 'police_station' | 'airport' | 'railway_crossing';
-export type EdgeType = 'road_segment' | 'bridge_deck' | 'flyover' | 'tunnel' | 'service_road';
+export type EdgeType = 'road_segment' | 'bridge_deck' | 'flyover' | 'tunnel' | 'service_road' | 'river' | 'stream';
 
 export interface GraphNode {
   id: string;
@@ -14,11 +14,8 @@ export interface GraphNode {
 }
 
 export interface SatelliteObservation {
-  soil_moisture_index?: number | undefined;
-  flood_water_depth_m?: number | undefined;
-  insar_subsidence_mm_yr?: number | undefined;
-  surface_temp_celsius?: number | undefined;
   rainfall_intensity_mm?: number | undefined;
+  surface_temp_celsius?: number | undefined;
 }
 
 export interface TrafficObservation {
@@ -31,6 +28,21 @@ export interface TrafficObservation {
   incident?: string | undefined;
   construction?: string | undefined;
   is_live_measured?: boolean | undefined;
+}
+
+export interface ModelProvenance {
+  model_name: string;
+  version: string;
+  input_datasets: string[];
+  prediction_timestamp: string;
+  confidence_pct: number;
+  limitations: string[];
+  calibration_status: 'Locally Calibrated' | 'Transferred Approximation' | 'Experimental';
+  validation_metrics: {
+    dataset: string;
+    metric: string;
+    value: number | string;
+  };
 }
 
 export interface GraphEdge {
@@ -55,17 +67,18 @@ export interface GraphEdge {
   bridge_type?: string | undefined;
   construction_year?: number | undefined;
   tile_id?: string | undefined; // Spatial grid index for LOD & viewport culling
-  rci: number; // Road Condition Index (0-100)
-  failure_probability: number; // 0.0 to 1.0
-  flood_vulnerability: number; // 0.0 to 1.0
-  earthquake_vulnerability: number; // 0.0 to 1.0
-  damage_state: 'none' | 'flooded' | 'subsided' | 'collapsed' | 'obstructed';
+  rci: number | null; // Road Condition Index (0-100), null if unmeasured
+  failure_probability: number | null; // 0.0 to 1.0, null if unmeasured
+  flood_vulnerability: number | null; // 0.0 to 1.0, null if unmeasured
+  earthquake_vulnerability: number | null; // 0.0 to 1.0, null if unmeasured
+  damage_state: 'none' | 'flooded' | 'subsided' | 'collapsed' | 'obstructed' | null;
   google_place_id?: string | undefined;
   osm_id?: string | undefined;
   width?: number | undefined;
   satellite_observations?: SatelliteObservation | undefined;
   traffic_status?: TrafficObservation | undefined;
   last_updated?: string | undefined;
+  provenance?: ModelProvenance | undefined;
 }
 
 export interface EnvironmentalTelemetry {
@@ -74,10 +87,6 @@ export interface EnvironmentalTelemetry {
   pressure_hpa: number;
   wind_speed_kmh: number;
   humidity_percent: number;
-  soil_moisture_index: number;
-  ground_subsidence_mm_yr: number;
-  ndvi_index: number;
-  flood_extent_sq_m: number;
   visibility_m?: number | undefined;
   cloud_cover_percent?: number | undefined;
   weather_alerts?: string[] | undefined;

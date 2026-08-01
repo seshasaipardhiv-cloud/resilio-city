@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
-import bgAuth from '../assets/bg_auth.png';
+import bgAuth from '../assets/bg_road.jpg';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -91,25 +91,25 @@ export default function AuthPage({ onSuccess, onBack }: Props) {
 
   const inputStyle: React.CSSProperties = {
     width: '100%', background: 'rgba(10,20,38,0.8)',
-    border: '1px solid rgba(255,140,0,0.25)',
+    border: '1px solid rgba(251,133,0,0.25)',
     borderRadius: 10, padding: '12px 16px',
-    color: '#fff', fontFamily: 'Space Grotesk', fontSize: 14,
+    color: '#fff', fontFamily: 'Outfit, Space Grotesk', fontSize: 14,
     outline: 'none', transition: 'border 0.2s',
     boxSizing: 'border-box'
   };
 
   const labelStyle: React.CSSProperties = {
     display: 'block', fontSize: 11, fontWeight: 700,
-    color: 'rgba(200,170,100,0.7)', textTransform: 'uppercase',
+    color: 'rgba(255,200,150,0.7)', textTransform: 'uppercase',
     letterSpacing: 1, marginBottom: 6
   };
 
   const btnStyle: React.CSSProperties = {
     width: '100%', padding: '14px',
-    background: 'linear-gradient(135deg, rgba(255,140,0,0.3), rgba(255,80,0,0.2))',
-    border: '1px solid rgba(255,140,0,0.6)',
+    background: 'linear-gradient(135deg, rgba(251,133,0,0.3), rgba(33,158,188,0.2))',
+    border: '1px solid rgba(251,133,0,0.6)',
     borderRadius: 12, color: '#fff',
-    fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 15,
+    fontFamily: 'Outfit, Space Grotesk', fontWeight: 800, fontSize: 15,
     cursor: loading ? 'not-allowed' : 'pointer', transition: 'all 0.25s',
     letterSpacing: 1, opacity: loading ? 0.7 : 1
   };
@@ -125,56 +125,48 @@ export default function AuthPage({ onSuccess, onBack }: Props) {
       position: 'fixed', inset: 0, zIndex: 200,
       backgroundImage: `url(${bgAuth})`, backgroundSize: 'cover', backgroundPosition: 'center',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'Space Grotesk, sans-serif', padding: 20
+      fontFamily: 'Outfit, Space Grotesk, sans-serif', padding: 20
     }}>
       {/* Dark overlay for readability */}
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 0 }} />
-      {/* Animated background grid */}
-      <div style={{
-        position: 'absolute', inset: 0, zIndex: 0, opacity: 0.1,
-        backgroundImage: 'linear-gradient(rgba(255,140,0,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,140,0,0.5) 1px, transparent 1px)',
-        backgroundSize: '50px 50px'
-      }} />
+      
 
       {/* Card */}
-      <div style={{
+      <div className="animate-pop glass-panel" style={{
         position: 'relative', zIndex: 1, width: '100%', maxWidth: 460,
-        background: 'rgba(8,12,22,0.95)',
-        border: '1px solid rgba(255,140,0,0.2)',
         borderRadius: 24,
-        boxShadow: '0 0 80px rgba(255,100,0,0.1), 0 40px 80px rgba(0,0,0,0.6)',
-        overflow: 'hidden'
+        overflow: 'hidden', backdropFilter: 'blur(20px)', background: 'rgba(10,15,25,0.65)', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 30px 60px -15px rgba(0,0,0,0.8)'
       }}>
         {/* Header */}
         <div style={{
           padding: '28px 32px 20px',
-          borderBottom: '1px solid rgba(255,140,0,0.1)',
-          background: 'linear-gradient(135deg, rgba(255,140,0,0.06), rgba(255,50,0,0.03))'
+          borderBottom: '1px solid rgba(251,133,0,0.1)',
+          background: 'linear-gradient(135deg, rgba(251,133,0,0.06), rgba(33,158,188,0.03))'
         }}>
           <button onClick={onBack} style={{
-            background: 'none', border: 'none', color: 'rgba(200,160,80,0.7)',
-            cursor: 'pointer', fontSize: 13, fontFamily: 'Space Grotesk',
+            background: 'none', border: 'none', color: 'rgba(255,200,150,0.7)',
+            cursor: 'pointer', fontSize: 13, fontFamily: 'Outfit, Space Grotesk',
             marginBottom: 16, padding: 0, display: 'flex', alignItems: 'center', gap: 6
           }}>← Back</button>
-          <div style={{ fontWeight: 900, fontSize: 28, background: 'linear-gradient(90deg, #ff8c00, #ffd700)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+          <div style={{ fontWeight: 900, fontSize: 28, background: 'linear-gradient(90deg, #fb8500, #8ecae6)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             🏙️ RESILIO CITY
           </div>
-          <div style={{ fontSize: 12, color: 'rgba(180,140,80,0.6)', letterSpacing: 2, marginTop: 4, textTransform: 'uppercase' }}>
+          <div style={{ fontSize: 12, color: 'rgba(180,220,255,0.6)', letterSpacing: 2, marginTop: 4, textTransform: 'uppercase' }}>
             National Digital Twin Platform
           </div>
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,140,0,0.1)' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid rgba(251,133,0,0.1)' }}>
           {tabs.map(t => (
             <button
               key={t.id} onClick={() => { setTab(t.id); setError(''); setSuccess(''); }}
               style={{
                 flex: 1, padding: '14px 8px', border: 'none', cursor: 'pointer',
-                background: tab === t.id ? 'rgba(255,140,0,0.12)' : 'transparent',
-                borderBottom: `2px solid ${tab === t.id ? '#ff8c00' : 'transparent'}`,
-                color: tab === t.id ? '#ffd700' : 'rgba(180,140,80,0.5)',
-                fontFamily: 'Space Grotesk', fontWeight: 700, fontSize: 13,
+                background: tab === t.id ? 'rgba(251,133,0,0.12)' : 'transparent',
+                borderBottom: `2px solid ${tab === t.id ? '#fb8500' : 'transparent'}`,
+                color: tab === t.id ? '#8ecae6' : 'rgba(180,220,255,0.5)',
+                fontFamily: 'Outfit, Space Grotesk', fontWeight: 700, fontSize: 13,
                 transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6
               }}
             >
@@ -204,24 +196,24 @@ export default function AuthPage({ onSuccess, onBack }: Props) {
                 <label style={labelStyle}>Email Address</label>
                 <input type="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
                   placeholder="your@email.com" style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = 'rgba(255,140,0,0.6)'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(255,140,0,0.25)'}
+                  onFocus={e => e.target.style.borderColor = 'rgba(251,133,0,0.6)'}
+                  onBlur={e => e.target.style.borderColor = 'rgba(251,133,0,0.25)'}
                 />
               </div>
               <div>
                 <label style={labelStyle}>Password</label>
                 <input type="password" required value={loginPass} onChange={e => setLoginPass(e.target.value)}
                   placeholder="••••••••" style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = 'rgba(255,140,0,0.6)'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(255,140,0,0.25)'}
+                  onFocus={e => e.target.style.borderColor = 'rgba(251,133,0,0.6)'}
+                  onBlur={e => e.target.style.borderColor = 'rgba(251,133,0,0.25)'}
                 />
               </div>
               <button type="submit" disabled={loading} style={btnStyle}>
                 {loading ? '⏳ Signing in...' : '→ SIGN IN'}
               </button>
-              <p style={{ textAlign: 'center', fontSize: 12, color: 'rgba(180,140,80,0.5)', margin: 0 }}>
+              <p style={{ textAlign: 'center', fontSize: 12, color: 'rgba(180,220,255,0.5)', margin: 0 }}>
                 Don't have an account?{' '}
-                <span onClick={() => setTab('register')} style={{ color: '#ffa040', cursor: 'pointer', fontWeight: 700 }}>Register here</span>
+                <span onClick={() => setTab('register')} style={{ color: '#ffb703', cursor: 'pointer', fontWeight: 700 }}>Register here</span>
               </p>
             </form>
           )}
@@ -233,24 +225,24 @@ export default function AuthPage({ onSuccess, onBack }: Props) {
                 <label style={labelStyle}>Full Name</label>
                 <input type="text" required value={regName} onChange={e => setRegName(e.target.value)}
                   placeholder="Your full name" style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = 'rgba(255,140,0,0.6)'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(255,140,0,0.25)'}
+                  onFocus={e => e.target.style.borderColor = 'rgba(251,133,0,0.6)'}
+                  onBlur={e => e.target.style.borderColor = 'rgba(251,133,0,0.25)'}
                 />
               </div>
               <div>
                 <label style={labelStyle}>Email Address</label>
                 <input type="email" required value={regEmail} onChange={e => setRegEmail(e.target.value)}
                   placeholder="your@email.com" style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = 'rgba(255,140,0,0.6)'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(255,140,0,0.25)'}
+                  onFocus={e => e.target.style.borderColor = 'rgba(251,133,0,0.6)'}
+                  onBlur={e => e.target.style.borderColor = 'rgba(251,133,0,0.25)'}
                 />
               </div>
               <div>
                 <label style={labelStyle}>Phone Number</label>
                 <input type="tel" value={regPhone} onChange={e => setRegPhone(e.target.value)}
                   placeholder="+91 XXXXX XXXXX" style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = 'rgba(255,140,0,0.6)'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(255,140,0,0.25)'}
+                  onFocus={e => e.target.style.borderColor = 'rgba(251,133,0,0.6)'}
+                  onBlur={e => e.target.style.borderColor = 'rgba(251,133,0,0.25)'}
                 />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -258,25 +250,25 @@ export default function AuthPage({ onSuccess, onBack }: Props) {
                   <label style={labelStyle}>Password</label>
                   <input type="password" required value={regPass} onChange={e => setRegPass(e.target.value)}
                     placeholder="Min 6 chars" style={inputStyle}
-                    onFocus={e => e.target.style.borderColor = 'rgba(255,140,0,0.6)'}
-                    onBlur={e => e.target.style.borderColor = 'rgba(255,140,0,0.25)'}
+                    onFocus={e => e.target.style.borderColor = 'rgba(251,133,0,0.6)'}
+                    onBlur={e => e.target.style.borderColor = 'rgba(251,133,0,0.25)'}
                   />
                 </div>
                 <div>
                   <label style={labelStyle}>Confirm</label>
                   <input type="password" required value={regPassConf} onChange={e => setRegPassConf(e.target.value)}
                     placeholder="Repeat" style={inputStyle}
-                    onFocus={e => e.target.style.borderColor = 'rgba(255,140,0,0.6)'}
-                    onBlur={e => e.target.style.borderColor = 'rgba(255,140,0,0.25)'}
+                    onFocus={e => e.target.style.borderColor = 'rgba(251,133,0,0.6)'}
+                    onBlur={e => e.target.style.borderColor = 'rgba(251,133,0,0.25)'}
                   />
                 </div>
               </div>
               <button type="submit" disabled={loading} style={btnStyle}>
                 {loading ? '⏳ Creating account...' : '✨ CREATE ACCOUNT'}
               </button>
-              <p style={{ textAlign: 'center', fontSize: 12, color: 'rgba(180,140,80,0.5)', margin: 0 }}>
+              <p style={{ textAlign: 'center', fontSize: 12, color: 'rgba(180,220,255,0.5)', margin: 0 }}>
                 Already have an account?{' '}
-                <span onClick={() => setTab('login')} style={{ color: '#ffa040', cursor: 'pointer', fontWeight: 700 }}>Sign in</span>
+                <span onClick={() => setTab('login')} style={{ color: '#ffb703', cursor: 'pointer', fontWeight: 700 }}>Sign in</span>
               </p>
             </form>
           )}
@@ -285,8 +277,8 @@ export default function AuthPage({ onSuccess, onBack }: Props) {
           {tab === 'admin' && (
             <form onSubmit={handleAdminLogin} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
               <div style={{
-                background: 'rgba(255,140,0,0.06)', border: '1px solid rgba(255,140,0,0.2)',
-                borderRadius: 10, padding: '12px 16px', fontSize: 12, color: 'rgba(200,160,80,0.7)'
+                background: 'rgba(251,133,0,0.06)', border: '1px solid rgba(251,133,0,0.2)',
+                borderRadius: 10, padding: '12px 16px', fontSize: 12, color: 'rgba(255,200,150,0.7)'
               }}>
                 🛡️ Administrative access is restricted. Unauthorized access attempts are logged.
               </div>
@@ -294,19 +286,19 @@ export default function AuthPage({ onSuccess, onBack }: Props) {
                 <label style={labelStyle}>Admin Username</label>
                 <input type="text" required value={adminUser} onChange={e => setAdminUser(e.target.value)}
                   placeholder="Enter admin username" style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = 'rgba(255,140,0,0.6)'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(255,140,0,0.25)'}
+                  onFocus={e => e.target.style.borderColor = 'rgba(251,133,0,0.6)'}
+                  onBlur={e => e.target.style.borderColor = 'rgba(251,133,0,0.25)'}
                 />
               </div>
               <div>
                 <label style={labelStyle}>Admin Password</label>
                 <input type="password" required value={adminPass} onChange={e => setAdminPass(e.target.value)}
                   placeholder="••••••••••" style={inputStyle}
-                  onFocus={e => e.target.style.borderColor = 'rgba(255,140,0,0.6)'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(255,140,0,0.25)'}
+                  onFocus={e => e.target.style.borderColor = 'rgba(251,133,0,0.6)'}
+                  onBlur={e => e.target.style.borderColor = 'rgba(251,133,0,0.25)'}
                 />
               </div>
-              <button type="submit" disabled={loading} style={{ ...btnStyle, background: 'linear-gradient(135deg, rgba(255,50,0,0.3), rgba(200,0,0,0.2))', borderColor: 'rgba(255,80,0,0.6)' }}>
+              <button type="submit" disabled={loading} style={{ ...btnStyle, background: 'linear-gradient(135deg, rgba(33,158,188,0.3), rgba(200,0,0,0.2))', borderColor: 'rgba(33,158,188,0.6)' }}>
                 {loading ? '⏳ Authenticating...' : '🛡️ ADMIN ACCESS'}
               </button>
             </form>

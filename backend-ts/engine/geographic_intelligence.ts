@@ -16,7 +16,6 @@ export interface HazardAssessment {
   hazard: string;
   risk_level: 'high' | 'medium' | 'low' | 'not_applicable';
   applicable: boolean;
-  score: number;           // 0.0–1.0
   reasoning: string;       // Human-readable scientific explanation
   contributing_factors: string[];
   mitigation_notes: string;
@@ -178,24 +177,17 @@ export class GeographicIntelligenceEngine {
     const assessments: HazardAssessment[] = [];
 
     // ── 1. Urban Flood Risk ──────────────────────────────────────────────────
-    const floodScore = (() => {
-      let s = 0;
-      if (climate.avg_rainfall_mm > 1500) s += 0.35;
-      else if (climate.avg_rainfall_mm > 800) s += 0.2;
-      else if (climate.avg_rainfall_mm > 400) s += 0.1;
-      if (elevation_m < 30) s += 0.25;
-      else if (elevation_m < 100) s += 0.15;
-      if (major_rivers.length >= 2) s += 0.2;
-      else if (major_rivers.length === 1) s += 0.1;
-      if (coastal.km < 15) s += 0.15; // tidal backwater
-      if (area_sq_km > 400) s += 0.05; // large impervious surface
-      return Math.min(1.0, s);
-    })();
+    let floodRisk: 'high' | 'medium' | 'low' = 'low';
+    if (climate.avg_rainfall_mm > 1500 || (climate.avg_rainfall_mm > 800 && elevation_m < 30)) {
+      floodRisk = 'high';
+    } else if (climate.avg_rainfall_mm > 800 || (climate.avg_rainfall_mm > 400 && elevation_m < 100)) {
+      floodRisk = 'medium';
+    }
+    
     assessments.push({
       hazard: 'Urban Flood',
-      risk_level: floodScore > 0.6 ? 'high' : floodScore > 0.35 ? 'medium' : 'low',
+      risk_level: floodRisk,
       applicable: true,
-      score: floodScore,
       reasoning: `Urban flooding is applicable to all Indian municipalities due to monsoon rainfall patterns. ${city_name_placeholder(state, elevation_m, climate.avg_rainfall_mm, major_rivers)}`,
       contributing_factors: [
         `Annual rainfall: ${climate.avg_rainfall_mm}mm`,
@@ -208,12 +200,14 @@ export class GeographicIntelligenceEngine {
 
     // ── 2. River Flood Risk ──────────────────────────────────────────────────
     const riverFlood = major_rivers.length > 0;
-    const riverScore = riverFlood ? Math.min(1.0, 0.3 + (major_rivers.length * 0.15) + (elevation_m < 100 ? 0.2 : 0)) : 0.05;
+    let riverFloodRisk: 'high' | 'medium' | 'low' = 'low';
+    if (riverFlood && elevation_m < 50) riverFloodRisk = 'high';
+    else if (riverFlood) riverFloodRisk = 'medium';
+
     assessments.push({
       hazard: 'River Flood',
-      risk_level: riverFlood && riverScore > 0.5 ? 'high' : riverFlood ? 'medium' : 'low',
+      risk_level: riverFlood ? riverFloodRisk : 'low',
       applicable: riverFlood,
-      score: riverScore,
       reasoning: riverFlood
         ? `River flooding applicable — ${major_rivers.join(', ')} flow through or adjacent to this municipality. ${elevation_m < 50 ? 'Low-lying terrain amplifies flood extent during monsoon discharge peaks.' : 'Moderate elevation provides some natural protection but riverside areas remain vulnerable.'}`
         : 'No major rivers pass through this municipality. River flood risk is low, limited to stormwater channels.',
@@ -223,14 +217,14 @@ export class GeographicIntelligenceEngine {
 
     // ── 3. Cyclone Risk ──────────────────────────────────────────────────────
     const cycloneApplicable = cycloneStates.some(s => state.includes(s)) && coastal.km < 200;
-    const cycloneScore = cycloneApplicable
-      ? Math.max(0, Math.min(1.0, 0.4 + (200 - coastal.km) / 400 + (coastal.type === 'bay_of_bengal' ? 0.15 : 0)))
-      : 0;
+    let cycloneRisk: 'high' | 'medium' | 'not_applicable' = 'not_applicable';
+    if (cycloneApplicable && coastal.km < 50) cycloneRisk = 'high';
+    else if (cycloneApplicable) cycloneRisk = 'medium';
+
     assessments.push({
       hazard: 'Cyclone',
-      risk_level: cycloneApplicable && cycloneScore > 0.6 ? 'high' : cycloneApplicable ? 'medium' : 'not_applicable',
+      risk_level: cycloneRisk,
       applicable: cycloneApplicable,
-      score: cycloneScore,
       reasoning: cycloneApplicable
         ? `Cyclone risk is applicable — ${state} lies on the ${coastal.type === 'bay_of_bengal' ? 'Bay of Bengal (highest cyclone frequency in India)' : 'Arabian Sea'} cyclone corridor. Municipality is ${coastal.km}km from ${coastal.name}.`
         : `Cyclone risk is NOT APPLICABLE — this municipality is ${coastal.km}km inland from the nearest coastline (${coastal.name}). Cyclones lose intensity rapidly overland and cannot sustain wind damage at this distance. Storm-related rainfall may still cause flooding.`,
@@ -244,12 +238,15 @@ export class GeographicIntelligenceEngine {
 
     // ── 4. Storm Surge Risk ──────────────────────────────────────────────────
     const surgeApplicable = coastal.km < 15 && elevation_m < 20;
+    let surgeRisk: 'high' | 'medium' | 'not_applicable' = 'not_applicable';
+    if (surgeApplicable) surgeRisk = 'high';
+    else if (coastal.km < 50 && elevation_m < 15) surgeRisk = 'medium';
+
     assessments.push({
       hazard: 'Storm Surge',
-      risk_level: surgeApplicable ? 'high' : coastal.km < 50 && elevation_m < 15 ? 'medium' : 'not_applicable',
-      applicable: surgeApplicable || (coastal.km < 50 && elevation_m < 15),
-      score: surgeApplicable ? 0.75 : coastal.km < 50 ? 0.3 : 0,
-      reasoning: surgeApplicable
+      risk_level: surgeRisk,
+      applicable: surgeRisk !== 'not_applicable',
+      reasoning: surgeRisk === 'high'
         ? `Storm surge risk is HIGH — municipality is within ${coastal.km}km of coast at elevation ${elevation_m}m, directly vulnerable to cyclone-driven storm surge inundation.`
         : elevation_m > 50
           ? `Storm surge is NOT APPLICABLE — municipal core is at ${elevation_m}m elevation, well above storm surge reach of even Category 5 cyclones.`
@@ -259,13 +256,14 @@ export class GeographicIntelligenceEngine {
     });
 
     // ── 5. Earthquake Risk ───────────────────────────────────────────────────
-    const eqScoreMap: Record<string, number> = { 'V': 0.85, 'IV': 0.55, 'III': 0.30, 'II': 0.15 };
-    const eqScore = eqScoreMap[seismic.zone] ?? 0.30;
+    let eqRisk: 'high' | 'medium' | 'low' = 'low';
+    if (seismic.zone === 'V' || seismic.zone === 'IV') eqRisk = 'high';
+    else if (seismic.zone === 'III') eqRisk = 'medium';
+
     assessments.push({
       hazard: 'Earthquake',
-      risk_level: eqScore > 0.7 ? 'high' : eqScore > 0.4 ? 'medium' : 'low',
+      risk_level: eqRisk,
       applicable: true,
-      score: eqScore,
       reasoning: `This municipality falls in BIS Seismic Zone ${seismic.zone}. ${seismic.description}. Damage potential depends on foundation conditions, building age, and bridge structural integrity.`,
       contributing_factors: [
         `BIS Seismic Zone: ${seismic.zone}`,
@@ -281,7 +279,6 @@ export class GeographicIntelligenceEngine {
       hazard: 'Soil Liquefaction',
       risk_level: liquefactionApplicable ? 'medium' : 'low',
       applicable: liquefactionApplicable,
-      score: liquefactionApplicable ? 0.45 : 0.1,
       reasoning: liquefactionApplicable
         ? `Liquefaction risk is applicable — municipality sits on alluvial river deposits (${major_rivers[0]}) at ${elevation_m}m elevation within BIS Seismic Zone ${seismic.zone}. Saturated sandy soils can lose bearing capacity during strong ground motion.`
         : `Liquefaction risk is LOW — ${elevation_m > 100 ? 'elevated terrain with consolidated rock/laterite base reduces liquefaction susceptibility' : 'no nearby major rivers to create saturated alluvial deposits at this location'}.`,
@@ -291,14 +288,14 @@ export class GeographicIntelligenceEngine {
 
     // ── 7. Landslide Risk ────────────────────────────────────────────────────
     const landslideApplicable = hillStates.some(s => state.includes(s)) || elevation_m > 500 || terrain.type === 'mountain';
-    const landslideScore = landslideApplicable
-      ? Math.min(1.0, 0.35 + (elevation_m > 1000 ? 0.3 : elevation_m > 500 ? 0.2 : 0.1) + (climate.avg_rainfall_mm > 2000 ? 0.25 : climate.avg_rainfall_mm > 1200 ? 0.15 : 0))
-      : 0.05;
+    let landslideRisk: 'high' | 'medium' | 'not_applicable' = 'not_applicable';
+    if (landslideApplicable && elevation_m > 1000 && climate.avg_rainfall_mm > 1500) landslideRisk = 'high';
+    else if (landslideApplicable) landslideRisk = 'medium';
+
     assessments.push({
       hazard: 'Landslide',
-      risk_level: landslideApplicable && landslideScore > 0.6 ? 'high' : landslideApplicable ? 'medium' : 'not_applicable',
+      risk_level: landslideRisk,
       applicable: landslideApplicable,
-      score: landslideScore,
       reasoning: landslideApplicable
         ? `Landslide risk is applicable — ${state} terrain at ${elevation_m}m elevation with ${climate.avg_rainfall_mm}mm annual rainfall. Steep slopes combined with saturated soils during monsoon trigger debris flows and slope failures.`
         : `Landslide risk is NOT APPLICABLE to this urban plain area. ${state} at ${elevation_m}m does not have slopes sufficient for gravity-driven mass movement. Localized cut-slope failures may occur on embankments.`,
@@ -314,21 +311,15 @@ export class GeographicIntelligenceEngine {
     });
 
     // ── 8. Heat Wave Risk ────────────────────────────────────────────────────
-    const heatScore = (() => {
-      let s = 0;
-      if (climate.avg_temp_c > 28) s += 0.3;
-      else if (climate.avg_temp_c > 25) s += 0.15;
-      if (climate.zone === 'arid' || climate.zone === 'semi-arid') s += 0.25;
-      if (elevation_m < 200) s += 0.1;
-      if (area_sq_km > 300) s += 0.15; // large urban heat island
-      return Math.min(1.0, s);
-    })();
+    let heatRisk: 'high' | 'medium' | 'low' = 'low';
+    if (climate.avg_temp_c > 28 || climate.zone === 'arid') heatRisk = 'high';
+    else if (climate.avg_temp_c > 25) heatRisk = 'medium';
+
     assessments.push({
       hazard: 'Heat Wave',
-      risk_level: heatScore > 0.55 ? 'high' : heatScore > 0.3 ? 'medium' : 'low',
+      risk_level: heatRisk,
       applicable: true,
-      score: heatScore,
-      reasoning: `Heat wave risk is applicable across all Indian urban areas due to expanding urban heat islands. ${state} experiences average ${climate.avg_temp_c}°C with ${climate.zone} climate. ${heatScore > 0.5 ? 'This city has elevated risk from arid climate, high temperatures, and extensive impervious surfaces.' : 'Moderate risk — monsoon season provides thermal relief but pre-monsoon heat stress is significant.'}`,
+      reasoning: `Heat wave risk is applicable across all Indian urban areas due to expanding urban heat islands. ${state} experiences average ${climate.avg_temp_c}°C with ${climate.zone} climate. ${heatRisk === 'high' ? 'This city has elevated risk from arid climate, high temperatures, and extensive impervious surfaces.' : 'Moderate risk — monsoon season provides thermal relief but pre-monsoon heat stress is significant.'}`,
       contributing_factors: [
         `Climate zone: ${climate.zone}`,
         `Average temperature: ${climate.avg_temp_c}°C`,
@@ -345,7 +336,6 @@ export class GeographicIntelligenceEngine {
       hazard: 'Wildfire / Forest Fire',
       risk_level: wildFireApplicable ? 'medium' : 'low',
       applicable: wildFireApplicable,
-      score: wildFireApplicable ? 0.35 : 0.1,
       reasoning: wildFireApplicable
         ? `Wildfire risk is applicable — ${state} has documented forest fire history, especially pre-monsoon (March–May) when dry conditions, wind, and dry biomass converge. Urban fringe areas adjacent to forest are most vulnerable.`
         : `Wildfire risk is low in this urban/semi-arid municipality. Dense urban land cover, low forest proximity, and annual monsoon moisture suppress wildfire conditions. Industrial fires are a separate infrastructure risk.`,
@@ -358,7 +348,6 @@ export class GeographicIntelligenceEngine {
       hazard: 'Infrastructure Failure Cascade',
       risk_level: 'medium',
       applicable: true,
-      score: 0.45,
       reasoning: `Infrastructure cascade risk is universally applicable across all Indian municipalities due to aging road networks, high traffic volumes, and monsoon-induced deterioration cycles. Road closures cascade to hospital isolation, emergency response delays, and utility disruption.`,
       contributing_factors: [
         'Indian urban road networks average 20–40 year construction age',

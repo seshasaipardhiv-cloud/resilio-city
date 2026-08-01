@@ -2,12 +2,14 @@ import { GraphNode, GraphEdge, EnvironmentalTelemetry } from './types.js';
 import { GeographicIntelligenceEngine } from './geographic_intelligence.js';
 import { MUNICIPAL_BOUNDARIES } from './municipal_boundaries.js';
 import { CITY_OSM_CONFIG } from './osm_loader.js';
+import { FloodModel, HazardPrediction } from './models/flood_model.js';
+import { EarthquakeModel } from './models/earthquake_model.js';
+import { LandslideModel } from './models/landslide_model.js';
+import { HeatwaveModel } from './models/heatwave_model.js';
 
 /**
  * Production Disaster Physics Engine
- * Evaluates hydrological flood propagation following terrain elevation, municipal drainage capacity, and river proximity.
- * Evaluates earthquake structural damage depending on bridges, road age, surface material, live traffic load, and ground motion (PGA).
- * ZERO RANDOMNESS. ZERO SYNTHETIC ESTIMATION.
+ * Delegates to scientifically grounded models (TWI, GMPE) instead of arbitrary heuristics.
  */
 
 export class DisasterPhysicsEngine {
@@ -56,7 +58,7 @@ export class DisasterPhysicsEngine {
     return {
       applicable: found ? found.risk_level !== 'not_applicable' : true,
       risk_level: found ? (found.risk_level as any) : 'medium',
-      reasoning: found ? found.reasoning : `Standard multi-hazard structural assessment for ${muni.name} across its ${profile.terrain_type} terrain and ${profile.climate_zone} climate.`,
+      reasoning: found ? found.reasoning : `Standard multi-hazard assessment applied based on geographic topology.`,
       mitigation_priority: found && found.mitigation_notes ? [found.mitigation_notes] : ['Infrastructure reinforcement']
     };
   }
@@ -92,7 +94,7 @@ export class DisasterPhysicsEngine {
   }
 
   /**
-   * Execute hydrological flood propagation or seismic structural evaluation across all municipal corridors
+   * Execute multi-model hazard propagation and attach scientific provenance to graph edges.
    */
   public static executeHazardPropagation(
     hazardType: string,
@@ -112,71 +114,56 @@ export class DisasterPhysicsEngine {
 
     let totalRciLoss = 0;
     const normIntensity = intensity > 1.0 ? intensity / 10.0 : intensity;
-    const pgaGroundMotion = Math.round((normIntensity * 0.65 + 0.05) * 100) / 100; // Peak Ground Acceleration (g)
+    const hType = hazardType.toLowerCase();
 
-    edges.forEach((edge) => {
-      const u = nodes[edge.source];
-      const v = nodes[edge.target];
-      const latU = u?.lat || 28.6139;
-      const lonU = u?.lon || 77.2090;
-      const elevationU = u?.elevation_m !== undefined ? u.elevation_m : 210;
-      const elevationV = v?.elevation_m !== undefined ? v.elevation_m : 210;
-      const meanElevation = (elevationU + elevationV) / 2.0;
+    let predictions: HazardPrediction[] = [];
 
-      let hazardTriggered = false;
+    // Route to appropriate scientific model
+    if (hType.includes('flood') || hType.includes('rain') || hType.includes('cyclone')) {
+      predictions = FloodModel.execute(nodes, edges, telemetry, normIntensity);
+    } else if (hType.includes('earthquake') || hType.includes('seismic')) {
+      predictions = EarthquakeModel.execute(nodes, edges, telemetry, normIntensity);
+    } else if (hType.includes('heat') || hType.includes('temperature')) {
+      predictions = HeatwaveModel.execute(nodes, edges, telemetry, normIntensity);
+    } else {
+      predictions = LandslideModel.execute(nodes, edges, telemetry, normIntensity);
+    }
 
-      const riverCheck = DisasterPhysicsEngine.calculateRiverProximityMeters(latU, lonU);
-      const isBridge = edge.is_bridge || edge.type === 'bridge_deck' || edge.type === 'flyover';
-
-      if (hazardType.toLowerCase().includes('flood') || hazardType.toLowerCase().includes('cyclon') || hazardType.toLowerCase().includes('rain')) {
-        const riverBonus = riverCheck.minDistanceMeters < 3500 ? (1.0 - (riverCheck.minDistanceMeters / 3500)) * 0.35 : 0.0;
-        const terrainDepressionIndex = Math.max(0.0, Math.min(1.0, (300 - meanElevation) / 180));
-        const vulnerabilityScore = normIntensity * 0.70 + riverBonus * 0.20 + terrainDepressionIndex * 0.15 - (edge.lanes >= 4 ? 0.08 : 0.0);
-        
-        // Threshold scales with superior intensity: low intensity only affects most vulnerable roads
-        if (vulnerabilityScore >= 0.42 + (1.0 - normIntensity) * 0.35 && !isBridge) {
-          edge.damage_state = 'flooded';
-          hazardTriggered = true;
-          stats.arterials_submerged++;
-          edge.current_speed_kmh = Math.round(edge.speed_limit_kmh * 0.2);
-          if (edge.satellite_observations) {
-            edge.satellite_observations.flood_water_depth_m = Math.round(vulnerabilityScore * 0.8 * 100) / 100;
-          }
-        }
-      } else if (hazardType.toLowerCase().includes('earthquake') || hazardType.toLowerCase().includes('seismic')) {
-        const roadAgeYears = Math.max(1, 2026 - (edge.construction_year || 2012));
-        const fatigueDegradation = Math.min(0.25, roadAgeYears * 0.01);
-        const bridgeAmplification = isBridge ? 0.25 : 0.0;
-        const vulnerabilityScore = normIntensity * 0.70 + fatigueDegradation * 0.20 + bridgeAmplification + (pgaGroundMotion * 0.1);
-
-        if (vulnerabilityScore >= 0.40 + (1.0 - normIntensity) * 0.35) {
-          edge.damage_state = isBridge ? 'collapsed' : 'subsided';
-          hazardTriggered = true;
-          if (isBridge) stats.bridges_structurally_compromised++;
-          if (edge.damage_state === 'collapsed') stats.seismic_collapses_detected++;
-          edge.current_speed_kmh = 5;
-          if (edge.traffic_status) {
-            edge.traffic_status.is_road_closed = true;
-            edge.traffic_status.closure_reason = `SEISMIC COLLAPSE (PGA: ${pgaGroundMotion}g)`;
-          }
-        }
-      } else {
-        // Landslide, subsidence, heatwave, or industrial infrastructural failure
-        const slopePct = Math.abs(elevationU - elevationV) / Math.max(15, edge.length_meters) * 100;
-        const vulnerabilityScore = normIntensity * 0.75 + (slopePct / 30.0) * 0.25;
-        if (vulnerabilityScore >= 0.45 + (1.0 - normIntensity) * 0.35) {
-          edge.damage_state = 'obstructed';
-          hazardTriggered = true;
-          edge.current_speed_kmh = 10;
-        }
+    // Apply predictions to the graph
+    predictions.forEach(pred => {
+      if (pred.damage_state !== 'none') {
+        affectedSet.add(pred.edge_id);
       }
+      
+      const edge = edges.find(e => e.id === pred.edge_id);
+      if (edge) {
+        if (pred.damage_state !== 'none') {
+          edge.damage_state = pred.damage_state;
+          
+          if (edge.damage_state === 'flooded') {
+            stats.arterials_submerged++;
+            edge.current_speed_kmh = Math.round(edge.speed_limit_kmh * 0.2);
+            if (!edge.satellite_observations) edge.satellite_observations = {};
+            edge.satellite_observations.flood_water_depth_m = Math.round(pred.severity * 2.5 * 100) / 100;
+          } else if (edge.damage_state === 'collapsed') {
+            stats.seismic_collapses_detected++;
+            if (edge.is_bridge) stats.bridges_structurally_compromised++;
+            edge.current_speed_kmh = 5;
+            if (!edge.traffic_status) edge.traffic_status = {};
+            edge.traffic_status.is_road_closed = true;
+            edge.traffic_status.closure_reason = `STRUCTURAL COLLAPSE`;
+          } else {
+            edge.current_speed_kmh = 10;
+          }
 
-      if (hazardTriggered) {
-        affectedSet.add(edge.id);
-        const rciDrop = Math.round(edge.rci * (0.35 + 0.4 * normIntensity));
-        edge.rci = Math.max(5, edge.rci - rciDrop);
-        edge.failure_probability = Math.min(0.99, Math.round((edge.failure_probability + 0.35 + 0.55 * normIntensity) * 100) / 100);
-        totalRciLoss += rciDrop;
+          // Provenance Payload attached directly to edge
+          edge.provenance = pred.provenance;
+
+          const rciDrop = Math.round((edge.rci || 70) * pred.severity);
+          edge.rci = Math.max(5, (edge.rci || 70) - rciDrop);
+          edge.failure_probability = pred.severity;
+          totalRciLoss += rciDrop;
+        }
       }
     });
 

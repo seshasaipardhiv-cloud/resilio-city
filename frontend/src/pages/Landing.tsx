@@ -348,26 +348,17 @@ export default function Landing({ onSelectCity }: Props) {
             return (
               <div
                 key={city.id}
+                className="animate-pop glass-panel"
                 onClick={() => !loadingCity && handleSelect(city)}
                 onMouseEnter={() => setHoveredCity(city.id)}
                 onMouseLeave={() => setHoveredCity(null)}
                 style={{
-                  background: isLoading
-                    ? `linear-gradient(135deg, ${city.theme}18 0%, rgba(6,12,28,0.97) 100%)`
-                    : isHovered
-                    ? `linear-gradient(135deg, ${city.theme}12 0%, rgba(10,18,36,0.95) 100%)`
-                    : 'rgba(8,15,30,0.75)',
-                  border: `1px solid ${isLoading ? city.theme + '90' : isHovered ? city.theme + '55' : 'rgba(255,255,255,0.08)'}`,
-                  borderRadius: 14, padding: '14px 16px', cursor: loadingCity ? 'default' : 'pointer',
+                  cursor: loadingCity ? 'default' : 'pointer',
                   transition: 'all 0.25s cubic-bezier(0.34,1.2,0.64,1)',
                   transform: isHovered && !isLoading ? 'translateY(-2px)' : 'translateY(0)',
-                  boxShadow: isLoading
-                    ? `0 12px 40px ${city.theme}25, 0 0 0 1px ${city.theme}40`
-                    : isHovered
-                    ? `0 8px 30px rgba(0,0,0,0.5), 0 0 20px ${city.theme}15`
-                    : '0 3px 15px rgba(0,0,0,0.3)',
                   position: 'relative', overflow: 'hidden',
                   display: 'flex', flexDirection: 'column', gap: 10,
+                  borderRadius: 14, padding: '14px 16px',
                 }}
               >
                 {/* Top accent */}

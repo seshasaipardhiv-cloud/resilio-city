@@ -5,6 +5,7 @@ import { LineLayer, ScatterplotLayer, BitmapLayer, PathLayer } from '@deck.gl/la
 import { TileLayer } from '@deck.gl/geo-layers';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import RoadModal from '../components/RoadModal';
+import { InfrastructureIntelligencePanel } from '../components/InfrastructureIntelligencePanel';
 import { validateAndProcessGISGraph, fitBounds, ThreeGISRendererEngine } from '../utils/gis_pipeline';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -16,15 +17,15 @@ const HAZARD_EMOJIS: Record<string, string> = {
 };
 
 function rciColor(rci: number, failProb: number): [number,number,number,number] {
-  // Critical — red
-  if (failProb >= 0.65 || rci <= 30) return [255, 40, 80, 255];
-  // High risk — orange-red
-  if (failProb >= 0.45 || rci <= 50) return [255, 100, 30, 245];
-  // Moderate — vivid yellow (this was getting skipped before)
-  if (failProb >= 0.25 || rci <= 70) return [255, 210, 0, 240];
-  // Good — lime green
+  // CRITICAL — red (fail prob > 70% OR rci ≤ 20)
+  if (failProb > 0.70 || rci <= 20) return [255, 40, 80, 255];
+  // HIGH RISK — yellow (fail prob > 40% OR rci ≤ 45)
+  if (failProb > 0.40 || rci <= 45) return [255, 210, 0, 240];
+  // MODERATE — orange (fail prob > 0.20 OR rci ≤ 65)
+  if (failProb > 0.20 || rci <= 65) return [255, 140, 30, 245];
+  // GOOD — lime green
   if (rci <= 85) return [120, 255, 80, 230];
-  // Excellent — bright green
+  // EXCELLENT — bright green
   return [0, 255, 157, 220];
 }
 
@@ -51,6 +52,8 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   const [cascadeAnalysis, setCascadeAnalysis] = useState<any>(null);
   const [showCascade, setShowCascade] = useState(false);
   const [showServices, setShowServices] = useState(true);
+  const [showIntelPanel, setShowIntelPanel] = useState(false);
+  const [intellData, setIntellData] = useState<any>(null);
   const [dashOffset, setDashOffset]   = useState(0);
   const animFrameRef = useRef<number>(0);
   const toastRef = useRef<any>(null);
@@ -185,6 +188,28 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       setRouteData(null);
     }
   }, [navStart, navEnd, routeMode, cityId, showToast]);
+
+  // ── AI Infrastructure Intelligence Fetcher ──────────────────────────────
+  useEffect(() => {
+    if (selectedRoad) {
+      const roadId = selectedRoad.properties?.id || selectedRoad.properties?.osm_id || selectedRoad.id;
+      if (roadId) {
+        axios.get(`${API}/city/road/${roadId}/intelligence`)
+          .then(res => {
+            setIntellData(res.data);
+            setShowIntelPanel(true);
+          })
+          .catch(err => {
+            console.error('Failed to fetch intelligence', err);
+            setIntellData(null);
+            setShowIntelPanel(false);
+          });
+      }
+    } else {
+      setShowIntelPanel(false);
+      setIntellData(null);
+    }
+  }, [selectedRoad]);
 
   const [viewState, setViewState] = useState({
     longitude: 77.2090, latitude: 28.6139, zoom: 12.5, pitch: 52, bearing: -12,
@@ -388,7 +413,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           if (upd) {
             return {
               ...f,
-              properties: { ...f.properties, failure_probability: upd.failure_probability, damage_type: upd.damage_type, rci: upd.rci }
+              properties: { ...f.properties, failure_probability: upd.failure_probability, damage_state: upd.damage_state || upd.damage_type, rci: upd.rci, provenance: upd.provenance }
             };
           }
           return f;
@@ -434,7 +459,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         if (upd) {
           return {
             ...f,
-            properties: { ...f.properties, failure_probability: upd.failure_probability, damage_type: upd.damage_type, rci: upd.rci }
+            properties: { ...f.properties, failure_probability: upd.failure_probability, damage_state: upd.damage_state || upd.damage_type, rci: upd.rci, provenance: upd.provenance }
           };
         }
         return f;
@@ -1032,11 +1057,11 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           <div style={{ padding: '14px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: 'rgba(160,200,230,0.7)', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10 }}>🗺 Road Condition Legend</div>
             {[
-              { col: '#00ff9d', label: 'Excellent (RCI > 85)' },
-              { col: '#78ff50', label: 'Good (RCI 71–85)' },
-              { col: '#ffd200', label: 'Moderate / Medium (RCI 51–70)' },
-              { col: '#ff641e', label: 'Poor (RCI 31–50)' },
-              { col: '#ff2850', label: 'Critical Failure Risk (≤30)' },
+              { col: '#00ff9d', label: 'Excellent (RCI > 85, Fail < 20%)' },
+              { col: '#78ff50', label: 'Good (RCI 66–85, Fail < 20%)' },
+              { col: '#ff8c1e', label: 'Moderate (Fail 20–40%)' },
+              { col: '#ffd200', label: 'High Risk — Yellow (Fail > 40%)' },
+              { col: '#ff2850', label: 'Critical — Red (Fail > 70%)' },
               { col: '#00d4ff', label: '── City Border (OSM/Govt)' },
               { col: '#00e5ff', label: '● Selected Road' },
             ].map(l => (
@@ -1046,7 +1071,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
               </div>
             ))}
             <div style={{ marginTop: 10, fontSize: 11, color: 'rgba(160,200,230,0.45)', lineHeight: 1.6, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 8 }}>
-              💡 Click any road for 3D Inspector<br/>⚡ Bottom-right button opens AI Panel
+              💡 Click any road for 3D Inspector + AI Intelligence Panel
             </div>
           </div>
 
@@ -1368,7 +1393,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
 
           {/* ── MAP LEGEND PANEL ── */}
           {showLegend && (
-            <div style={{ position: 'absolute', bottom: 24, right: 14, zIndex: 20, background: 'rgba(5, 12, 24, 0.92)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', padding: '12px 16px', backdropFilter: 'blur(16px)', width: 220, boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
+            <div style={{ position: 'absolute', bottom: 24, right: 14, zIndex: 20, background: 'rgba(5, 12, 24, 0.92)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', padding: '12px 16px', backdropFilter: 'blur(16px)', width: 230, boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <span style={{ fontSize: 11, fontWeight: 800, color: '#fff', textTransform: 'uppercase', letterSpacing: 1 }}>📖 Map Legend</span>
                 <button onClick={() => setShowLegend(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 13 }}>✕</button>
@@ -1376,19 +1401,19 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
               <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 7 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 14, height: 4, background: '#00ff9d', borderRadius: 2, boxShadow: '0 0 6px #00ff9d' }} />
-                  <span style={{ color: 'var(--text-dim)' }}>Optimal / High RCI (&gt;75)</span>
+                  <span style={{ color: 'var(--text-dim)' }}>Excellent / Good (Fail &lt;20%)</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 14, height: 4, background: '#ffd93d', borderRadius: 2 }} />
-                  <span style={{ color: 'var(--text-dim)' }}>Moderate RCI (50-75)</span>
+                  <div style={{ width: 14, height: 4, background: '#ff8c1e', borderRadius: 2 }} />
+                  <span style={{ color: 'var(--text-dim)' }}>Moderate (Fail 20–40%)</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 14, height: 4, background: '#ff7b35', borderRadius: 2 }} />
-                  <span style={{ color: 'var(--text-dim)' }}>Poor Condition (&lt;50)</span>
+                  <div style={{ width: 14, height: 4, background: '#ffd200', borderRadius: 2, boxShadow: '0 0 6px #ffd20080' }} />
+                  <span style={{ color: '#ffd200', fontWeight: 700 }}>⚠ High Risk — Yellow (Fail &gt;40%)</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 14, height: 4, background: '#ff3b6b', borderRadius: 2, boxShadow: '0 0 6px #ff3b6b' }} />
-                  <span style={{ color: 'var(--text-dim)' }}>Critical Failure Hazard</span>
+                  <span style={{ color: '#ff3b6b', fontWeight: 700 }}>🔴 Critical — Red (Fail &gt;70%)</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#00d4ff', border: '2px solid #fff' }} />
@@ -1621,6 +1646,14 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           onClose={() => setSelectedRoad(null)}
           onNavigateFrom={(id, lat, lon, name) => { setNavStart({ id, lat, lon, name }); showToast(`🚀 Origin Locked: ${name}`, 'info'); }}
           onNavigateTo={(id, lat, lon, name) => { setNavEnd({ id, lat, lon, name }); showToast(`🏁 Destination Locked: ${name}`, 'info'); }}
+        />
+      )}
+
+      {/* ── AI INFRASTRUCTURE INTELLIGENCE PANEL ── */}
+      {showIntelPanel && intellData && (
+        <InfrastructureIntelligencePanel
+          data={intellData}
+          onClose={() => setShowIntelPanel(false)}
         />
       )}
 

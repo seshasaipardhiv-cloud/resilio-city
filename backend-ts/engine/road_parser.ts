@@ -74,9 +74,10 @@ export class RoadParserEngine {
           lon: el.lon,
           tags: el.tags || {}
         };
-      } else if (el.type === 'way' && el.nodes && Array.isArray(el.nodes) && el.tags && el.tags.highway) {
-        const highwayClass = el.tags.highway.toLowerCase();
-        if (RoadParserEngine.VALID_HIGHWAY_CLASSES.has(highwayClass)) {
+      } else if (el.type === 'way' && el.nodes && Array.isArray(el.nodes) && el.tags && (el.tags.highway || el.tags.waterway)) {
+        const highwayClass = el.tags.highway ? el.tags.highway.toLowerCase() : '';
+        const waterwayClass = el.tags.waterway ? el.tags.waterway.toLowerCase() : '';
+        if (RoadParserEngine.VALID_HIGHWAY_CLASSES.has(highwayClass) || waterwayClass === 'river' || waterwayClass === 'stream') {
           const nodeIds = el.nodes.map((n: any) => n.toString());
           rawWays.push({
             id: el.id.toString(),
@@ -223,7 +224,10 @@ export class RoadParserEngine {
               const hasSignal = nodes[sourceId]!.type === 'traffic_signal' || nodes[targetId]!.type === 'traffic_signal';
 
               let edgeType: EdgeType = 'road_segment';
-              if (isBridge) edgeType = 'bridge_deck';
+              const waterwayClass = way.tags.waterway ? way.tags.waterway.toLowerCase() : '';
+              if (waterwayClass === 'river') edgeType = 'river';
+              else if (waterwayClass === 'stream') edgeType = 'stream';
+              else if (isBridge) edgeType = 'bridge_deck';
               else if (isTunnel) edgeType = 'tunnel';
               else if (highwayClass.includes('service') || highwayClass.includes('living')) edgeType = 'service_road';
               else if (highwayClass.includes('motorway') || highwayClass.includes('trunk')) edgeType = 'flyover';
@@ -237,6 +241,7 @@ export class RoadParserEngine {
               else if (highwayClass.includes('primary') || highwayClass.includes('secondary')) { defaultLanes = 4; defaultSpeed = 60; }
               else if (highwayClass.includes('residential') || highwayClass.includes('living')) { defaultLanes = 2; defaultSpeed = 30; }
               else if (highwayClass.includes('track') || way.tags.surface === 'unpaved' || way.tags.surface === 'dirt') { defaultLanes = 1; defaultSpeed = 20; surface = 'unpaved'; }
+              else if (waterwayClass) { defaultLanes = 0; defaultSpeed = 0; surface = 'unpaved'; }
 
               const lanes = way.tags.lanes ? parseInt(way.tags.lanes, 10) || defaultLanes : defaultLanes;
               const speedLimit = way.tags.maxspeed ? parseInt(way.tags.maxspeed, 10) || defaultSpeed : defaultSpeed;
@@ -266,11 +271,11 @@ export class RoadParserEngine {
                 has_traffic_signal: hasSignal,
                 bridge_type: isBridge ? (way.tags.bridge === 'viaduct' ? 'Elevated Viaduct Span' : 'Structural Girder Span') : undefined,
                 construction_year: way.tags.start_date ? parseInt(way.tags.start_date, 10) || 2012 : 2014,
-                rci: isBridge ? 88 : 78,
-                failure_probability: isBridge ? 0.04 : 0.02,
-                flood_vulnerability: isBridge ? 0.08 : (surface === 'unpaved' ? 0.45 : 0.18),
-                earthquake_vulnerability: isBridge ? 0.32 : 0.05,
-                damage_state: 'none'
+                rci: null,
+                failure_probability: null,
+                flood_vulnerability: null,
+                earthquake_vulnerability: null,
+                damage_state: null
               });
             }
           }

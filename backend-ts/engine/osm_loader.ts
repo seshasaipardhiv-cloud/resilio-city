@@ -6,6 +6,7 @@ import { MUNICIPAL_BOUNDARIES, getCameraFitBounds } from './municipal_boundaries
 import { RoadParserEngine } from './road_parser.js';
 import { TTLCacheManager } from './cache_manager.js';
 import { MunicipalBoundaryClipper } from './boundary_clipper.js';
+import { ElevationService } from './elevation_service.js';
 
 /**
  * Production OpenStreetMap Municipal Overpass Ingestor & Cache Loader
@@ -119,6 +120,8 @@ export class OsmLoaderEngine {
   way["amenity"="fire_station"](${bboxStr});
   way["amenity"="police"](${bboxStr});
   way["healthcare"](${bboxStr});
+  way["waterway"="river"](${bboxStr});
+  way["waterway"="stream"](${bboxStr});
 );
 out body;
 >;
@@ -180,6 +183,9 @@ out skel qt;
       console.warn(`[Validation Alert] Downloaded network for ${cityId} contained ${edges.length} segments.`);
     }
 
+    // Fetch genuine topolographic elevation profiles via Open-Meteo DEM
+    await ElevationService.attachElevations(nodes);
+
     const fitBounds = getCameraFitBounds(cityId, edges);
 
     const graph: CityRoadGraph = {
@@ -199,11 +205,10 @@ out skel qt;
         pressure_hpa: 1013.2,
         wind_speed_kmh: 12.0,
         humidity_percent: 68,
-        soil_moisture_index: 0.35,
-        ground_subsidence_mm_yr: -1.5,
-        ndvi_index: 0.42,
-        flood_extent_sq_m: 0,
-        source_verification: "Copernicus Sentinel-1 & Open-Meteo Primary Telemetry",
+        visibility_m: 10000,
+        cloud_cover_percent: 25,
+        weather_alerts: [],
+        source_verification: "OPEN_METEO_API_V1",
         timestamp: new Date().toISOString()
       }
     };
