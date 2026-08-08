@@ -1,8 +1,13 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import express, { type Request, type Response } from 'express';
 import cors from 'cors';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 import { CITY_CONFIGS } from './engine/cities.js';
 import { loadOsmCity, CITY_OSM_CONFIG } from './engine/osm_loader.js';
 import { CityDataFusionEngine } from './engine/city_data_fusion.js';
@@ -1085,6 +1090,50 @@ app.get('/petitions/my', (req: Request, res: Response): void => {
   res.json({ success: true, petitions });
 });
 
+// ── Production Frontend Static Serving & SPA Fallback ────────────────────────
+const candidateDistDirs = [
+  path.resolve(__dirname, '../../frontend/dist'),
+  path.resolve(__dirname, '../frontend/dist'),
+  path.resolve(process.cwd(), '../frontend/dist'),
+  path.resolve(process.cwd(), 'frontend/dist'),
+  path.resolve(process.cwd(), 'dist-frontend'),
+];
+const frontendDistPath = candidateDistDirs.find(dir => fs.existsSync(path.join(dir, 'index.html')));
+
+if (frontendDistPath) {
+  console.log(`[Production Static Serving] Serving frontend UI from: ${frontendDistPath}`);
+  app.use(express.static(frontendDistPath));
+
+  // SPA fallback for non-API GET requests (Express 5 compatible)
+  app.use((req: Request, res: Response, next) => {
+    if (req.method !== 'GET') return next();
+    if (
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/city') ||
+      req.path.startsWith('/cities') ||
+      req.path.startsWith('/auth') ||
+      req.path.startsWith('/petitions') ||
+      req.path.startsWith('/health') ||
+      req.path.startsWith('/search') ||
+      req.path.startsWith('/route')
+    ) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDistPath, 'index.html'));
+  });
+} else {
+  // If frontend is not built locally, provide an informative root status
+  app.get('/', (_req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      service: 'Resilio City Digital Twin Backend',
+      version: '4.0.0',
+      active_cities: Object.keys(MUNICIPAL_BOUNDARIES).length,
+      frontend_note: 'Frontend dist not found at root; build frontend using npm run build in frontend/'
+    });
+  });
+}
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(Number(PORT), '0.0.0.0', () => {
@@ -1094,3 +1143,4 @@ app.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`   • Geographic Intelligence Engine ready`);
   console.log(`   • Auth & Petition system active`);
 });
+

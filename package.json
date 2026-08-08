@@ -1,0 +1,12 @@
+{
+  "name": "resilio-city",
+  "version": "4.0.0",
+  "private": true,
+  "description": "Resilio City — AI-Powered Geospatial Digital Twin for Urban Climate Resilience",
+  "scripts": {
+    "build:frontend": "npm --prefix frontend install && npm --prefix frontend run build",
+    "build:backend": "npm --prefix backend-ts install && npm --prefix backend-ts run build",
+    "build": "npm run build:frontend && npm run build:backend",
+    "start": "node backend-ts/server.js"
+  }
+}

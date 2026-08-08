@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import bgLandingAutumn from '../assets/bg_landing_autumn.jpg';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '');
 
 interface CityCard {
   id: string; name: string; subtitle: string; emoji: string; theme: string;

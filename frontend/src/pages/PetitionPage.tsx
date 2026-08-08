@@ -2,7 +2,7 @@ import { useState } from 'react';
 import axios from 'axios';
 import bgPetition from '../assets/bg_petition.jpg';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '');
 
 interface Props {
   onBack: () => void;

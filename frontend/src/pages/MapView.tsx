@@ -8,7 +8,7 @@ import RoadModal from '../components/RoadModal';
 import { InfrastructureIntelligencePanel } from '../components/InfrastructureIntelligencePanel';
 import { validateAndProcessGISGraph, fitBounds, ThreeGISRendererEngine } from '../utils/gis_pipeline';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '');
 
 interface Props { cityId: string; cityName: string; onBack: () => void; }
 
@@ -345,16 +345,22 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         } catch { /* geo profile fallback */ }
         // Fetch administrative boundary polygon from OSM cache
         try {
+          setCityBoundary(null); // Reset boundary on city switch
           const bdry = await axios.get(`${API}/city/${cityId}/boundary`, { timeout: 15000 });
           if (bdry.data) {
-            setCityBoundary(bdry.data); // Store the full Feature for GeoJsonLayer
-            
-            const coordsToRender = bdry.data.geometry?.coordinates || bdry.data.coordinates;
+            // GeoJsonLayer requires a FeatureCollection; wrap single Feature if needed
+            const feature = bdry.data;
+            const featureCollection = (feature.type === 'FeatureCollection')
+              ? feature
+              : { type: 'FeatureCollection', features: [feature] };
+            setCityBoundary(featureCollection);
+
+            const coordsToRender = feature.geometry?.coordinates || feature.coordinates;
             if (coordsToRender && threeEngineRef.current) {
               await threeEngineRef.current.buildBoundaryGeometryAsync(coordsToRender, validated.centerLon, validated.centerLat);
             }
           }
-        } catch { /* boundary fallback - not critical */ }
+        } catch (e) { console.warn('[Boundary] fetch failed:', e); /* boundary fallback - not critical */ }
       } catch { /* Non-critical telemetry fallback */ }
 
     } catch (err: any) {

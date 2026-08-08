@@ -2,7 +2,7 @@ import { useState } from 'react';
 import axios from 'axios';
 import bgAuth from '../assets/bg_road.jpg';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3000' : '');
 
 interface Props {
   onSuccess: (token: string, user: any, role: 'user' | 'admin') => void;
