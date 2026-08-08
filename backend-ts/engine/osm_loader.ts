@@ -110,6 +110,13 @@ out body;
 >;
 out skel qt;`.trim();
 
+      const osmStartTime = new Date().toISOString();
+      console.log(`[GEOMETRY BACKEND]
+REQUEST RECEIVED: OpenStreetMap Ingestion
+CITY: ${cityId} (${muni.name})
+BOUNDARY: ${JSON.stringify(muni.bbox)}
+OSM QUERY START: ${osmStartTime}`);
+
       for (const mirror of OsmLoaderEngine.OVERPASS_MIRRORS) {
         let retries = 2;
         while (retries > 0 && rawElements.length === 0) {
@@ -126,7 +133,11 @@ out skel qt;`.trim();
 
             if (res.data && Array.isArray(res.data.elements) && res.data.elements.length > 200) {
               rawElements = res.data.elements;
-              console.log(`[OSM Overpass API] Successfully fetched ${rawElements.length} real OSM municipal elements from ${mirror}.`);
+              const osmEndTime = new Date().toISOString();
+              console.log(`[GEOMETRY BACKEND]
+OSM QUERY END: ${osmEndTime}
+OSM STATUS: 200 OK (${mirror})
+OSM ELEMENT COUNT: ${rawElements.length}`);
               try {
                 fs.writeFileSync(localFile, JSON.stringify(res.data), 'utf-8');
               } catch (writeErr: any) {

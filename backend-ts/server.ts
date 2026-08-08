@@ -340,6 +340,13 @@ const handleLoadCity = async (req: Request, res: Response): Promise<void> => {
     resetRoadsToHealthyBaseline(activeCity);
     cityModelCache[cityId] = activeCity;
 
+    console.log(`[GEOMETRY BACKEND]
+REQUEST RECEIVED: ${req.method} ${req.originalUrl}
+CITY: ${cityId} (${activeCity.city_name})
+NODES: ${Object.keys(activeCity.nodes).length}
+ROADS: ${activeCity.edges.length}
+CACHE STATUS: POPULATED`);
+
     res.json({
       message: `Real City '${activeCity.city_name}' loaded from OpenStreetMap & satellite remote sensing. ZERO FAKE GENERATION.`,
       nodes: Object.keys(activeCity.nodes).length,
@@ -351,7 +358,10 @@ const handleLoadCity = async (req: Request, res: Response): Promise<void> => {
       cache_status: 'ready',
     });
   } catch (e: any) {
-    console.error(`Failed loading city ${cityId}:`, e);
+    console.error(`[GEOMETRY ERROR]
+stage: /city/${cityId}/load
+message: ${e.message || e}
+stack: ${e.stack || 'No stack trace'}`);
     res.status(500).json({ detail: `Error loading city: ${e.message || e}` });
   }
 };
@@ -359,16 +369,17 @@ app.get('/cities/:id/load', handleLoadCity);
 app.get('/city/:id/load', handleLoadCity);
 
 // ── 5. Get City GeoJSON — Full polyline preserved for PathLayer rendering ────
-app.get('/city', (_req: Request, res: Response): void => {
-  if (!activeCity?.edges.length) { res.status(400).json({ detail: 'No city loaded.' }); return; }
+app.get('/city', (req: Request, res: Response): void => {
+  if (!activeCity?.edges.length) {
+    console.warn(`[GEOMETRY BACKEND] GET /city called but activeCity is null or empty.`);
+    res.status(400).json({ detail: 'No city loaded.' });
+    return;
+  }
   const features = activeCity.edges.map((edge: any) => {
     const u = activeCity!.nodes[edge.source], v = activeCity!.nodes[edge.target];
     if (!u || !v) return null;
-    // Use the full polyline from OSM if available (preserves all intermediate vertices)
-    // This is critical for correct spatial alignment — roads follow their real OSM geometry
     let coordinates: number[][];
     if (edge.polyline && Array.isArray(edge.polyline) && edge.polyline.length >= 2) {
-      // Validate every vertex in the polyline
       coordinates = edge.polyline.filter((pt: any) =>
         Array.isArray(pt) && pt.length >= 2 &&
         typeof pt[0] === 'number' && typeof pt[1] === 'number' &&
@@ -386,7 +397,11 @@ app.get('/city', (_req: Request, res: Response): void => {
       properties: { ...edge, city_id: activeCity!.city_id, vertex_count: coordinates.length },
     };
   }).filter(Boolean);
-  console.log(`[GeoJSON] Serving ${features.length} roads. Full polyline mode: ON (Streaming)`);
+
+  console.log(`[GEOMETRY BACKEND]
+REQUEST RECEIVED: GET /city
+CITY: ${activeCity.city_id} (${activeCity.city_name})
+GEOJSON FEATURE COUNT: ${features.length}`);
   
   res.setHeader('Content-Type', 'application/json');
   res.write('{"type":"FeatureCollection","satellite_telemetry":' + JSON.stringify(activeCity.satellite_telemetry || null) + ',"features":[');

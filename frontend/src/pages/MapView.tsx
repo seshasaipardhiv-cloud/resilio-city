@@ -266,13 +266,31 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       console.log(`[STAGE 2: API Request] Fetching network geometry from backend for ${cityId}...`);
       setLoadMsg('Downloading road network...');
 
+      const loadUrl = `${API}/city/${cityId}/load`;
+      console.log(`[GEOMETRY REQUEST]
+URL: ${loadUrl || window.location.origin + '/city/' + cityId + '/load'}
+METHOD: GET
+CITY: ${cityName} (${cityId})`);
+
       // 1. Load city model into backend memory with explicit error verification
       try {
-        await axios.get(`${API}/city/${cityId}/load`, { timeout: 180000 });
+        const loadRes = await axios.get(loadUrl, { timeout: 180000 });
+        console.log(`[GEOMETRY REQUEST]
+URL: ${loadUrl || window.location.origin + '/city/' + cityId + '/load'}
+METHOD: GET
+CITY: ${cityName} (${cityId})
+STATUS: ${loadRes.status}
+STATUS TEXT: ${loadRes.statusText}
+RESPONSE CONTENT TYPE: ${loadRes.headers?.['content-type'] || 'application/json'}
+RESPONSE BODY PREVIEW: ${JSON.stringify(loadRes.data).slice(0, 200)}`);
       } catch (loadErr: any) {
         const status = loadErr?.response?.status;
         const detail = loadErr?.response?.data?.detail || loadErr?.message || 'Network request failed';
-        console.error(`[STAGE 2 Error] /city/${cityId}/load failed [Status: ${status}]:`, detail);
+        console.error(`[GEOMETRY ERROR]
+stage: /city/${cityId}/load
+message: ${detail}
+status: ${status ?? 'NETWORK_ERROR'}
+stack: ${loadErr?.stack || 'No stack trace'}`);
 
         let diagCode = 'API_ROUTE_FAILED';
         let userMsg = 'No map data available.';
@@ -300,8 +318,16 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       }
 
       // 2. Retrieve validated GeoJSON FeatureCollection
-      const geo = await axios.get(`${API}/city`, { timeout: 180000 });
-      console.log(`[STAGE 3: Backend Response] Received data payload. Status: ${geo.status}, Features Count: ${geo.data?.features?.length ?? 0}`);
+      const geoUrl = `${API}/city`;
+      const geo = await axios.get(geoUrl, { timeout: 180000 });
+      console.log(`[GEOMETRY REQUEST]
+URL: ${geoUrl || window.location.origin + '/city'}
+METHOD: GET
+CITY: ${cityName} (${cityId})
+STATUS: ${geo.status}
+STATUS TEXT: ${geo.statusText}
+RESPONSE CONTENT TYPE: ${geo.headers?.['content-type'] || 'application/json'}
+GEOJSON FEATURE COUNT: ${geo.data?.features?.length ?? 0}`);
 
       setLoadMsg('Parsing geometry...');
       const rawFeatures = geo.data?.features ?? [];
