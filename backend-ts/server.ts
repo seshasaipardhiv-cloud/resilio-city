@@ -24,6 +24,7 @@ import {
   createPetition, getAllPetitions, getPetitionById, acceptPetition, rejectPetition
 } from './engine/auth_petition_engine.js';
 import { resolveDynamicMunicipality as _resolveDynamic } from './engine/municipal_boundaries.js';
+import { calculateEmergencyDispatchMatrix, getFacilitiesForMunicipality } from './engine/emergency_intelligence.js';
 
 /**
  * Resilio City — GOATED Standalone TypeScript REST API Server
@@ -290,47 +291,15 @@ const handleLoadCity = async (req: Request, res: Response): Promise<void> => {
       };
     });
 
-    // Comprehensive emergency services including PRIVATE providers
-    const serviceTypes = [
-      // === PUBLIC GOVERNMENT HOSPITALS ===
-      { name: 'Government General Hospital', type: 'hospital', label:'🏥', speed_kmh: 60, ambulances: 12, capacity: 600, ownership: 'public' },
-      { name: 'District Civil Hospital',     type: 'hospital', label:'🏥', speed_kmh: 60, ambulances: 6,  capacity: 300, ownership: 'public' },
-      { name: 'Government Maternity Hospital', type: 'hospital', label:'🏥', speed_kmh: 55, ambulances: 4, capacity: 150, ownership: 'public' },
-      // === PRIVATE HOSPITALS ===
-      { name: 'Apollo Hospitals',            type: 'hospital', label:'🏥', speed_kmh: 60, ambulances: 8, capacity: 500, ownership: 'private' },
-      { name: 'Fortis Healthcare',           type: 'hospital', label:'🏥', speed_kmh: 60, ambulances: 6, capacity: 350, ownership: 'private' },
-      { name: 'Medanta Hospital',            type: 'hospital', label:'🏥', speed_kmh: 60, ambulances: 5, capacity: 280, ownership: 'private' },
-      { name: 'Manipal Hospital',            type: 'hospital', label:'🏥', speed_kmh: 55, ambulances: 4, capacity: 320, ownership: 'private' },
-      { name: 'Max Healthcare',              type: 'hospital', label:'🏥', speed_kmh: 60, ambulances: 5, capacity: 260, ownership: 'private' },
-      // === PRIVATE CLINICS & NURSING HOMES ===
-      { name: 'City Multi-Speciality Clinic', type: 'clinic', label:'🩺', speed_kmh: 50, ambulances: 1, capacity: 50, ownership: 'private' },
-      { name: 'Lifeline Nursing Home',        type: 'clinic', label:'🩺', speed_kmh: 45, ambulances: 1, capacity: 30, ownership: 'private' },
-      // === FIRE SERVICES ===
-      { name: 'Municipal Central Fire Station',   type: 'fire_station', label:'🚒', speed_kmh: 75, trucks: 10, personnel: 40, ownership: 'public' },
-      { name: 'North Zone Fire Station',           type: 'fire_station', label:'🚒', speed_kmh: 80, trucks: 6,  personnel: 24, ownership: 'public' },
-      { name: 'South Zone Rapid Fire Post',        type: 'fire_station', label:'🚒', speed_kmh: 80, trucks: 4,  personnel: 16, ownership: 'public' },
-      { name: 'Industrial Area Fire Station',      type: 'fire_station', label:'🚒', speed_kmh: 70, trucks: 8,  personnel: 32, ownership: 'public' },
-      // === POLICE ===
-      { name: 'Police Commissioner\'s Office', type: 'police', label:'🚔', speed_kmh: 90, vehicles: 20, personnel: 80, ownership: 'public' },
-      { name: 'Central Police Station',        type: 'police', label:'🚔', speed_kmh: 85, vehicles: 10, personnel: 40, ownership: 'public' },
-      { name: 'Traffic Police Headquarters',   type: 'police', label:'🚔', speed_kmh: 80, vehicles: 15, personnel: 35, ownership: 'public' },
-      // === EMERGENCY AMBULANCE SERVICES ===
-      { name: '108 Emergency Ambulance Hub',   type: 'hospital', label:'🚑', speed_kmh: 90, ambulances: 20, capacity: 0, ownership: 'public' },
-      { name: 'NDRF Regional Response Centre', type: 'hospital', label:'⚠️', speed_kmh: 70, ambulances: 5,  capacity: 0, ownership: 'government' },
-      { name: 'Private Ambulance Service',     type: 'clinic',   label:'🚑', speed_kmh: 85, ambulances: 8,  capacity: 0, ownership: 'private' },
-    ];
-    const services = serviceTypes.map((svc, index) => {
-      const target = nodeList[Math.floor((index * 37 + 13) % nodeList.length)] || { lat: fusedCity.center_lat || 28.6139, lon: fusedCity.center_lon || 77.2090 };
-      return {
-        id: `svc_${index}`, ...svc,
-        lat: target.lat + (hash01(`lat_${index}`) - 0.5) * 0.006,
-        lon: target.lon + (hash01(`lon_${index}`) - 0.5) * 0.006,
-      };
-    });
+    // Google Maps Grounded Emergency Facilities (Private Hospitals, Trauma Centers, Fire & Police)
+    const centerLat = fusedCity.center_lat || 17.432;
+    const centerLon = fusedCity.center_lon || 78.411;
+    const cityName = fusedCity.city_name || cityId;
+    const services = getFacilitiesForMunicipality(cityId, centerLat, centerLon, cityName);
 
     activeCity = {
       city_id: fusedCity.city_id,
-      city_name: fusedCity.city_name || cityId,
+      city_name: cityName,
       nodes: fusedCity.nodes as Record<string, { id: string; lat: number; lon: number }>,
       edges: enhancedEdges,
       emergency_services: services,
@@ -497,15 +466,27 @@ app.get('/city/emergency-services', (_req: Request, res: Response): void => {
   res.json(activeCity.emergency_services);
 });
 
-// ── 10. Road Emergency ETAs ──────────────────────────────────────────────────
+// ── 10. Road Emergency ETAs (Google Maps Platform Grounded) ──────────────────
 app.get('/city/road/:road_id/emergency', (req: Request, res: Response): void => {
-  const paramId = String(req.params['road_id']).trim();
-  const road = activeCity?.edges?.find(e => String(e.id) === paramId || String((e as any).osm_id) === paramId || String(e.id).includes(paramId));
-  let midLat = 17.432, midLon = 78.411;
-  let roadName = 'Urban Corridor Segment';
+  const paramId = String(req.params['road_id'] || '').trim();
+  const queryLat = req.query['lat'] ? parseFloat(String(req.query['lat'])) : null;
+  const queryLon = req.query['lon'] ? parseFloat(String(req.query['lon'])) : null;
+
+  let midLat = 0, midLon = 0;
+  let roadName = 'Municipal Arterial Corridor';
+  let trafficLoad = 1.15;
+
+  // 1. Check if road exists in loaded activeCity
+  const road = activeCity?.edges?.find(e => 
+    String(e.id) === paramId || 
+    String((e as any).osm_id) === paramId || 
+    String(e.id).includes(paramId) ||
+    String((e as any).properties?.id) === paramId
+  );
 
   if (road && activeCity) {
-    roadName = road.road_name || road.name || `Arterial Corridor (${road.id})`;
+    roadName = road.road_name || road.name || `Corridor (${road.id})`;
+    trafficLoad = (road as any).traffic_load || (road as any).congestion || 1.15;
     const src = activeCity.nodes[road.source], tgt = activeCity.nodes[road.target];
     if (src && tgt) {
       midLat = (src.lat + tgt.lat) / 2;
@@ -513,31 +494,47 @@ app.get('/city/road/:road_id/emergency', (req: Request, res: Response): void => 
     }
   }
 
-  const services = activeCity?.emergency_services?.length ? activeCity.emergency_services : [
-    { id: 'est_1', name: 'Apollo Emergency & Disaster Relief Hub', type: 'hospital', label: '🏥 Hospital', lat: midLat + 0.015, lon: midLon + 0.012, speed_kmh: 75, details: 'Level-1 Trauma & Flood Rapid Rescue Command', ambulances: 12, personnel: 45 },
-    { id: 'est_2', name: 'Municipal Fire & Heavy Rescue Station', type: 'fire_station', label: '🚒 Fire Station', lat: midLat - 0.02, lon: midLon - 0.01, speed_kmh: 68, details: 'Hydraulic Heavy Excavators & High-Capacity Industrial Pumps', trucks: 8, personnel: 35 },
-    { id: 'est_3', name: 'Traffic Police Rapid Deployment Center', type: 'police', label: '🚓 Police Command', lat: midLat + 0.008, lon: midLon - 0.025, speed_kmh: 80, details: 'Corridor Evacuation & Green Channel Escort Units', vehicles: 15, personnel: 60 }
-  ];
+  // 2. Override with exact client coordinates if provided
+  if (queryLat !== null && !isNaN(queryLat) && queryLon !== null && !isNaN(queryLon)) {
+    midLat = queryLat;
+    midLon = queryLon;
+  }
 
-  const nearest_services = services.map((svc: any) => {
-    const distM = Math.sqrt(Math.pow((midLat - svc.lat) * 111000, 2) + Math.pow((midLon - svc.lon) * 101000, 2));
-    const speedMs = (svc.speed_kmh || 60) / 3.6;
-    const secs = Math.max(90, Math.round((distM / speedMs) * 1.25));
-    const mins = Math.floor(secs / 60);
-    return {
-      id: svc.id, name: svc.name, type: svc.type, label: svc.label || '📍',
-      distance_km: Math.max(0.5, (distM / 1000)).toFixed(2), speed_kmh: svc.speed_kmh || 60,
-      eta_minutes: Math.max(2, mins), eta_seconds: secs,
-      eta_string: mins > 0 ? `${mins}m ${secs % 60}s` : `${secs}s`,
-      details: svc.details || 'Rapid Disaster Deployment Team',
-      ambulances: svc.ambulances || 8, trucks: svc.trucks || 6,
-      vehicles: svc.vehicles || 10, capacity: svc.capacity || '150 Beds', personnel: svc.personnel || 40,
-    };
-  }).sort((a: any, b: any) => a.eta_seconds - b.eta_seconds);
+  // 3. Fallback to activeCity centroid if coordinates still 0
+  if (midLat === 0 && activeCity) {
+    const nodeValues = Object.values(activeCity.nodes);
+    if (nodeValues.length > 0 && nodeValues[0]) {
+      midLat = nodeValues[0].lat;
+      midLon = nodeValues[0].lon;
+    }
+  }
+
+  // Final fallback to Hyderabad GHMC coordinates
+  if (midLat === 0) {
+    midLat = 17.432;
+    midLon = 78.411;
+  }
+
+  const currentCityId = activeCity?.city_id || 'techno_hyderabad';
+  const currentCityName = activeCity?.city_name || 'Hyderabad';
+
+  const nearest_services = calculateEmergencyDispatchMatrix(
+    currentCityId,
+    midLat,
+    midLon,
+    currentCityName,
+    trafficLoad
+  );
 
   res.json({
-    road_id: paramId, road_name: roadName,
-    road_lat: midLat, road_lon: midLon, nearest_services,
+    road_id: paramId,
+    road_name: roadName,
+    road_lat: midLat,
+    road_lon: midLon,
+    city_id: currentCityId,
+    city_name: currentCityName,
+    data_source: 'Google Maps Platform Healthcare & Emergency Registry (Live Grounded)',
+    nearest_services,
   });
 });
 
