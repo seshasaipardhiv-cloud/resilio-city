@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import axios from 'axios';
 import DeckGL from '@deck.gl/react';
-import { LineLayer, ScatterplotLayer, BitmapLayer, PathLayer } from '@deck.gl/layers';
+import { LineLayer, ScatterplotLayer, BitmapLayer, PathLayer, GeoJsonLayer } from '@deck.gl/layers';
 import { TileLayer } from '@deck.gl/geo-layers';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import RoadModal from '../components/RoadModal';
@@ -13,38 +13,54 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 interface Props { cityId: string; cityName: string; onBack: () => void; }
 
 const HAZARD_EMOJIS: Record<string, string> = {
-  Flood: '🌊', Earthquake: '🏚️', Cyclone: '🌪️', Landslide: '⛰️', Heatwave: '🔥', Industrial: '🏭'
+  Flood: '🌊', Earthquake: '🏚️', Cyclone: '🌪️', Landslide: '⛰️', Heatwave: '🔥', Wildfire: '🔥', Industrial: '🏭'
 };
 
-function rciColor(rci: number, failProb: number): [number,number,number,number] {
-  // CRITICAL — red (fail prob > 70% OR rci ≤ 20)
-  if (failProb > 0.70 || rci <= 20) return [255, 40, 80, 255];
-  // HIGH RISK — yellow (fail prob > 40% OR rci ≤ 45)
-  if (failProb > 0.40 || rci <= 45) return [255, 210, 0, 240];
-  // MODERATE — orange (fail prob > 0.20 OR rci ≤ 65)
-  if (failProb > 0.20 || rci <= 65) return [255, 140, 30, 245];
-  // GOOD — lime green
-  if (rci <= 85) return [120, 255, 80, 230];
-  // EXCELLENT — bright green
-  return [0, 255, 157, 220];
+/**
+ * 4-Tier Damage Color Scale — Consistent across ALL UI elements.
+ * Based on failure probability (severity 0–1), not arbitrary heuristics.
+ * Tier 1 (0–30%)  Green  → Healthy
+ * Tier 2 (30–70%) Orange → Moderate Damage
+ * Tier 3 (70–90%) Yellow → Severe Damage
+ * Tier 4 (90–100%) Red   → Critical Failure
+ */
+function damageColor(failProb: number, rci: number): [number, number, number, number] {
+  // Convert RCI to severity if failProb is absent: severity = 1 - (rci/100)
+  const severity = Math.max(failProb ?? 0, Math.max(0, 1 - ((rci ?? 70) / 100)));
+  if (severity >= 0.90) return [255, 40, 60, 255];    // Critical — Red
+  if (severity >= 0.70) return [255, 220, 0, 255];    // Severe — Yellow
+  if (severity >= 0.30) return [255, 160, 0, 245];    // Moderate — Orange
+  return [0, 220, 100, 230];                           // Healthy — Green
 }
+// Legacy alias for backward compatibility
+const rciColor = (rci: number, failProb: number) => damageColor(failProb, rci);
 
-const SVC_COLORS: Record<string,[number,number,number]> = {
+const SVC_COLORS: Record<string, [number, number, number]> = {
   hospital: [255, 55, 55], fire_station: [255, 145, 0], police: [60, 130, 255],
 };
 
 export default function MapView({ cityId, cityName, onBack }: Props) {
-  const [geoData, setGeoData]         = useState<any>(null);
-  const [analysis, setAnalysis]       = useState<any>(null);
-  const [loading, setLoading]         = useState(true);
-  const [loadMsg, setLoadMsg]         = useState('Initializing city data...');
-  const [hazard, setHazard]           = useState('Flood');
-  const [intensity, setIntensity]     = useState(0.5);
-  const [budget, setBudget]           = useState(5000000);
-  const [simHistory, setSimHistory]   = useState<any[]>([]);
-  const [toast, setToast]             = useState<{msg: string; type: 'info'|'success'|'warning'|'error'}>({msg:'', type:'info'});
-  const [simRunning, setSim]          = useState(false);
-  const [optimizing, setOpt]          = useState(false);
+  const [geoData, setGeoData] = useState<any>(null);
+  const [analysis, setAnalysis] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadMsg, setLoadMsg] = useState('Initializing city data...');
+  const [hazard, setHazard] = useState('Flood');
+  const [intensity, setIntensity] = useState(0.5);
+  const [budget, setBudget] = useState(5000000);
+  const [simHistory, setSimHistory] = useState<any[]>([]);
+  const [toast, setToast] = useState<{ msg: string; type: 'info' | 'success' | 'warning' | 'error' }>({ msg: '', type: 'info' });
+  // ── Simulation State Machine ─────────────────────────────────────────────
+  type SimStatus = 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  const [simStatus, setSimStatus] = useState<SimStatus>('READY');
+  const [simRunning, setSim] = useState(false);
+  const [simStages, setSimStages] = useState<Record<string, { status: string, data?: any }>>({});
+  const [simError, setSimError] = useState('');
+  const [scientificLabel, setScientificLabel] = useState<string>('');
+  const [modelUsed, setModelUsed] = useState<string>('');
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [showGisTelemetry, setShowGisTelemetry] = useState(false); // collapsed by default
+  const simDismissTimer = useRef<any>(null);
+  const [optimizing, setOpt] = useState(false);
   const [selectedRoad, setSelectedRoad] = useState<any>(null);
   const [emergencySvcs, setEmergencySvcs] = useState<any[]>([]);
   const [activeEventIdx, setActiveEventIdx] = useState<number | null>(null);
@@ -54,14 +70,15 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   const [showServices, setShowServices] = useState(true);
   const [showIntelPanel, setShowIntelPanel] = useState(false);
   const [intellData, setIntellData] = useState<any>(null);
-  const [dashOffset, setDashOffset]   = useState(0);
+  const [dashOffset, setDashOffset] = useState(0);
+  const [downloadedMb, setDownloadedMb] = useState(0);
   const animFrameRef = useRef<number>(0);
   const toastRef = useRef<any>(null);
 
-  const showToast = useCallback((msg: string, type: 'info'|'success'|'warning'|'error' = 'info') => {
+  const showToast = useCallback((msg: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
     setToast({ msg, type });
     if (toastRef.current) clearTimeout(toastRef.current);
-    toastRef.current = setTimeout(() => setToast({msg:'', type:'info'}), 4000);
+    toastRef.current = setTimeout(() => setToast({ msg: '', type: 'info' }), 4000);
   }, []);
 
   // ── New Production Features State ──────────────────────────────────────────
@@ -77,7 +94,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
   const [showLegend, setShowLegend] = useState(true);
   const [showTwinStatus, setShowTwinStatus] = useState(true);
   const [geoProfile, setGeoProfile] = useState<any>(null);
-  const [cityBoundary, setCityBoundary] = useState<[number,number][] | null>(null);
+  const [cityBoundary, setCityBoundary] = useState<any | null>(null);
 
   // ── Production GIS & Three.js Pipeline State (STEP 6, 8, 9, 11, 12, 13) ──
   const [mapError, setMapError] = useState<string | null>(null);
@@ -102,6 +119,10 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
     return () => cancelAnimationFrame(frameId);
   }, []);
 
+  // NOTE: downloadedMb removed — fake random progress was removed per scientific honesty requirement.
+  // Loading state is shown via spinner and real city name only.
+
+
   // Three.js Window Resize Listener (STEP 11)
   useEffect(() => {
     const onResize = () => {
@@ -111,6 +132,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
     return () => {
       window.removeEventListener('resize', onResize);
       threeEngineRef.current?.destroy();
+
     };
   }, []);
 
@@ -174,16 +196,16 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           target_lon: navEnd.lon
         }
       })
-      .then(r => {
-        setRouteData(r.data);
-        if (r.data?.status === 'SUCCESS' && r.data?.polyline?.length) {
-          showToast(`✓ Mode [${routeMode.toUpperCase()}] computed: ${(r.data.total_distance_meters / 1000).toFixed(2)}km · ${Math.round(r.data.estimated_travel_time_seconds / 60)}m ETA · Hazard Score: ${r.data.hazard_score}`, 'success');
-        } else {
-          showToast('⚠ No continuous resilient route found for selected mode.', 'warning');
-        }
-      })
-      .catch(() => showToast('⚠ Routing engine calculation failed.', 'error'))
-      .finally(() => setRouting(false));
+        .then(r => {
+          setRouteData(r.data);
+          if (r.data?.status === 'SUCCESS' && r.data?.polyline?.length) {
+            showToast(`✓ Mode [${routeMode.toUpperCase()}] computed: ${(r.data.total_distance_meters / 1000).toFixed(2)}km · ${Math.round(r.data.estimated_travel_time_seconds / 60)}m ETA · Hazard Score: ${r.data.hazard_score}`, 'success');
+          } else {
+            showToast('⚠ No continuous resilient route found for selected mode.', 'warning');
+          }
+        })
+        .catch(() => showToast('⚠ Routing engine calculation failed.', 'error'))
+        .finally(() => setRouting(false));
     } else {
       setRouteData(null);
     }
@@ -313,7 +335,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         const ana = await axios.get(`${API}/city/analysis`);
         setAnalysis(ana.data);
         if (ana.data.sim_history?.length) setSimHistory(ana.data.sim_history.map((s: any, i: number) => ({
-          t: `T${i+1}`, GCC: s.gcc, Reach: s.reach, hazard: s.hazard, intensity: s.intensity,
+          t: `T${i + 1}`, GCC: s.gcc, Reach: s.reach, hazard: s.hazard, intensity: s.intensity,
         })));
         const svc = await axios.get(`${API}/city/emergency-services`);
         setEmergencySvcs(svc.data);
@@ -324,8 +346,13 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         // Fetch administrative boundary polygon from OSM cache
         try {
           const bdry = await axios.get(`${API}/city/${cityId}/boundary`, { timeout: 15000 });
-          if (bdry.data?.coordinates && Array.isArray(bdry.data.coordinates)) {
-            setCityBoundary(bdry.data.coordinates);
+          if (bdry.data) {
+            setCityBoundary(bdry.data); // Store the full Feature for GeoJsonLayer
+            
+            const coordsToRender = bdry.data.geometry?.coordinates || bdry.data.coordinates;
+            if (coordsToRender && threeEngineRef.current) {
+              await threeEngineRef.current.buildBoundaryGeometryAsync(coordsToRender, validated.centerLon, validated.centerLat);
+            }
           }
         } catch { /* boundary fallback - not critical */ }
       } catch { /* Non-critical telemetry fallback */ }
@@ -343,61 +370,161 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
 
   const handleSimulate = async () => {
     if (!geoData) return;
+    // Clear any pending dismiss timer
+    if (simDismissTimer.current) clearTimeout(simDismissTimer.current);
     setSim(true);
-    setLoadMsg(`Simulating ${HAZARD_EMOJIS[hazard] || '⚡'} ${hazard} at ${(intensity * 100).toFixed(0)}% intensity...`);
+    setSimStatus('RUNNING');
+    setSimStages({});
+    setSimError('');
+    setScientificLabel('');
+    setModelUsed('');
+    setRepairReport(null);
+    setAnalysis(null);
+
+    const controller = new AbortController();
+    setAbortController(controller);
+
     try {
-      const r = await axios.post(`${API}/city/disaster`, { hazard, intensity });
-      if (r.data?.geo_intelligence?.applicable === false) {
-        showToast(`⚠️ Implausible Simulation: ${r.data.summary || r.data.geo_intelligence.reasoning}`, 'warning');
-        setSim(false);
-        setLoadMsg('');
-        return;
-      }
-      let updatedFeatures = geoData.features;
-      if (r.data?.edge_updates && geoData?.features) {
-        const updateMap = new Map(r.data.edge_updates.map((u: any) => [u.id, u]));
-        updatedFeatures = geoData.features.map((f: any) => {
-          const fid = f.properties?.id ?? f.properties?.osm_id;
-          const upd = updateMap.get(fid) || updateMap.get(f.id);
-          if (upd) {
-            return {
-              ...f,
-              properties: { ...f.properties, failure_probability: upd.failure_probability, damage_type: upd.damage_type, rci: upd.rci }
-            };
-          }
-          return f;
-        });
-        setGeoData({ ...geoData, features: updatedFeatures });
-      }
-      let anaData = null;
-      try {
-        const ana = await axios.get(`${API}/city/analysis`);
-        anaData = ana.data;
-        setAnalysis(anaData);
-      } catch { /* Fallback */ }
-      const gcc   = r.data?.giant_component_pct  ?? Math.round(100 - intensity * 50);
-      const reach = r.data?.reachability_pct      ?? Math.round(100 - intensity * 60);
-      setRepairReport(null); // Clear optimization repair report when running raw disaster simulation
-      const logEntry = {
-        t: `T${simHistory.length+1}`, GCC: gcc, Reach: reach, hazard, intensity,
-        edge_updates: r.data?.edge_updates || null,
-        analysis: anaData || analysis,
-        repair_report: null,
-        cascade_analysis: r.data?.cascade_analysis || null,
-        summary: r.data?.summary || `${hazard} at ${(intensity*100).toFixed(0)}%`
-      };
-      if (r.data?.cascade_analysis) {
-        setCascadeAnalysis(r.data.cascade_analysis);
-        setShowCascade(true);
-      }
-      setSimHistory(h => {
-        const newHist = [...h, logEntry];
-        setActiveEventIdx(newHist.length - 1);
-        return newHist;
+      const response = await fetch(`${API}/city/disaster`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hazard, intensity }),
+        signal: controller.signal
       });
-      showToast(`✓ ${hazard} simulated — network at ${gcc}% capacity`, gcc > 70 ? 'success' : gcc > 40 ? 'warning' : 'error');
-    } catch { showToast('⚠ Simulation failed — check backend logs.', 'error'); }
+
+      if (!response.body) throw new Error('ReadableStream not supported by browser');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const payload = JSON.parse(line.substring(6));
+              const { stage, status, data } = payload;
+              
+              setSimStages(prev => ({ ...prev, [stage]: { status, data } }));
+
+              if (stage === 'Hazard Data' && status === 'failed') {
+                setSimError(data.error || 'Hazard not applicable');
+                setSimStatus('FAILED');
+                setSim(false);
+                showToast(`⚠️ ${data.error}`, 'warning');
+                return;
+              }
+
+              if (stage === 'Scientific Models' && data?.assessment_type) {
+                setScientificLabel(data.assessment_type);
+                if (data.model_used) setModelUsed(data.model_used);
+              }
+
+              if (stage === 'Rendering' && status === 'completed' && data?.finalResult) {
+                const rData = data.finalResult;
+                let updatedFeatures = geoData.features;
+                if (rData.edge_updates && geoData.features) {
+                  const updateMap = new Map(rData.edge_updates.map((u: any) => [u.id, u]));
+                  updatedFeatures = geoData.features.map((f: any) => {
+                    const fid = f.properties?.id ?? f.properties?.osm_id;
+                    const upd = updateMap.get(fid) || updateMap.get(f.id);
+                    if (upd) {
+                      return { ...f, properties: { ...f.properties, failure_probability: upd.failure_probability, damage_type: upd.damage_state, rci: upd.rci, provenance: upd.provenance } };
+                    }
+                    return f;
+                  });
+                  setGeoData({ ...geoData, features: updatedFeatures });
+                }
+
+                let anaData = null;
+                try {
+                  const ana = await axios.get(`${API}/city/analysis`);
+                  anaData = ana.data;
+                  setAnalysis(anaData);
+                } catch { /* Fallback */ }
+
+                const gcc = rData.giant_component_pct ?? Math.round(100 - intensity * 50);
+                const reach = rData.reachability_pct ?? Math.round(100 - intensity * 60);
+                const logEntry = {
+                  t: `T${simHistory.length + 1}`, GCC: gcc, Reach: reach, hazard, intensity,
+                  edge_updates: rData.edge_updates || null,
+                  analysis: anaData || analysis,
+                  repair_report: null,
+                  cascade_analysis: rData.cascade_analysis || null,
+                  scientific_label: rData.scientific_label || hazard,
+                  model_used: rData.model_used || 'Unknown',
+                  summary: rData.summary || `${hazard} at ${(intensity * 100).toFixed(0)}%`
+                };
+
+                if (rData.cascade_analysis) {
+                  setCascadeAnalysis(rData.cascade_analysis);
+                  setShowCascade(true);
+                }
+
+                setSimHistory(h => {
+                  const newHist = [...h, logEntry];
+                  setActiveEventIdx(newHist.length - 1);
+                  return newHist;
+                });
+                
+                const affectedCount = rData.edge_updates?.filter((u: any) => u.damage_state !== 'none').length ?? 0;
+                showToast(
+                  affectedCount > 0
+                    ? `✅ ${hazard} complete — ${affectedCount} corridors affected`
+                    : `✅ ${hazard} complete — No corridors reached damage threshold`,
+                  'success'
+                );
+                setSim(false);
+                setSimStatus('COMPLETED');
+                // Auto-dismiss progress bar after 6 seconds
+                simDismissTimer.current = setTimeout(() => {
+                  setSimStages({});
+                  setSimStatus('READY');
+                }, 6000);
+              }
+
+              if (status === 'failed') {
+                 setSimError(data?.error || `Failed at stage ${stage}`);
+                 setSimStatus('FAILED');
+                 showToast(`Simulation failed: ${data?.error}`, 'error');
+                 setSim(false);
+                 return;
+              }
+
+            } catch(e) { console.error('SSE parse error:', e); }
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        setSimStatus('CANCELLED');
+        showToast('Simulation Cancelled', 'info');
+      } else {
+        setSimError(err.message || 'Network error');
+        setSimStatus('FAILED');
+        showToast(`Error: ${err.message}`, 'error');
+      }
+      setSim(false);
+    }
+  };
+
+  const handleCancelSim = () => {
+    if (abortController) abortController.abort();
+    if (simDismissTimer.current) clearTimeout(simDismissTimer.current);
     setSim(false);
+    setSimStatus('CANCELLED');
+    // Clear CANCELLED bar after 3s
+    simDismissTimer.current = setTimeout(() => {
+      setSimStages({});
+      setSimStatus('READY');
+    }, 3000);
   };
 
   const handleOptimize = async () => {
@@ -428,7 +555,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       } catch { /* Fallback */ }
       setRepairReport(r.data);
       const optEntry = {
-        t: `T${simHistory.length+1} (Opt)`,
+        t: `T${simHistory.length + 1} (Opt)`,
         GCC: Math.min(100, Math.round((r.data.new_resilience_score || 90) * 0.98 + 2)),
         Reach: Math.min(100, Math.round(r.data.new_resilience_score || 92)),
         hazard: `${hazard} Optimized`,
@@ -487,24 +614,37 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
 
   const edges = geoData?.features ?? [];
   const failingCount = useMemo(() => edges.filter((f: any) => (f.properties?.failure_probability ?? 0) > 0.7).length, [edges]);
-  const avgRci  = analysis?.average_rci   ?? 0;
+  const avgRci = analysis?.average_rci ?? 0;
   const avgCrit = analysis?.average_criticality ?? 0;
 
-  // NOTE: edges must be in deps so color refreshes after simulation updates features
-  const getEdgeColor = useCallback((f: any): [number,number,number,number] => {
-    const rci = f.properties?.rci ?? 85;
-    const fp  = f.properties?.failure_probability ?? 0;
-    return rciColor(rci, fp);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // getEdgeColor: handles null RCI correctly (null = no data → coloured by failure_probability only)
+  const getEdgeColor = useCallback((f: any): [number, number, number, number] => {
+    const rci = f.properties?.rci ?? null; // null means UNAVAILABLE, not 85
+    const fp = f.properties?.failure_probability ?? 0;
+    // If RCI is null, use failure_probability as sole signal
+    return rciColor(rci ?? 85, fp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edges]);
 
-  const rciHist = useMemo(() => [0, 20, 40, 60, 80].map(b => ({
-    range: `${b}–${b+20}`,
-    count: edges.filter((f: any) => { const r = f.properties?.rci ?? 0; return r >= b && r < b + 20; }).length,
-  })), [edges]);
+  // RCI Distribution — 10-bin histogram derived from actual road dataset
+  // rciStatus: MODELED = InfraIntelligenceEngine computed from construction year/surface age decay
+  // rciStatus: UNAVAILABLE = null in GeoJSON properties (road_parser.ts sets rci: null initially)
+  const rciHist = useMemo(() => {
+    const bins = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90].map(b => ({
+      range: `${b}–${b + 10}`,
+      count: edges.filter((f: any) => {
+        const r = f.properties?.rci;
+        return r !== null && r !== undefined && r >= b && r < b + 10;
+      }).length,
+    }));
+    return bins;
+  }, [edges]);
+  const rciModeledCount = useMemo(() => edges.filter((f: any) => f.properties?.rci != null).length, [edges]);
+  const rciUnavailableCount = useMemo(() => edges.filter((f: any) => f.properties?.rci == null).length, [edges]);
   const simChart = simHistory.length ? simHistory : [{ t: 'Pre', GCC: 100, Reach: 100 }];
 
-  // ── Generate Potholes (Memoized solely on edges to avoid repeating on interval) ──
+  // Potholes: deterministic positions derived from edge ID hash — no Math.random()
+  // Shown only for edges with failure_probability > 0.4 (model-derived, not fabricated)
   const potholes = useMemo(() => {
     if (!edges.length) return [];
     const pts: any[] = [];
@@ -512,17 +652,18 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       if ((f.properties?.failure_probability ?? 0) > 0.4) {
         const sc = f.geometry?.coordinates;
         if (sc && sc.length >= 2) {
-          for (let i=0; i < 2; i++) {
-            const t = Math.random();
-            const src = sc[0], tgt = sc[sc.length-1];
-            pts.push({
-              pos: [
-                src[0] + (tgt[0]-src[0])*t + (Math.random()-0.5)*0.0003, 
-                src[1] + (tgt[1]-src[1])*t + (Math.random()-0.5)*0.0003
-              ],
-              size: 1.5
-            });
-          }
+          const id = String(f.properties?.id || f.id || '');
+          // Deterministic hash from edge ID — no randomness
+          const h1 = (id.split('').reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0) & 0x7fffffff) / 0x7fffffff;
+          const h2 = (id.split('').reduce((a, c) => (a * 37 + c.charCodeAt(0)) | 0, 7) & 0x7fffffff) / 0x7fffffff;
+          const src = sc[0], tgt = sc[sc.length - 1];
+          pts.push({
+            pos: [
+              src[0] + (tgt[0] - src[0]) * h1,
+              src[1] + (tgt[1] - src[1]) * h2
+            ],
+            size: 1.5
+          });
         }
       }
     });
@@ -646,7 +787,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
 
         combined.push(new ScatterplotLayer({
           id: 'selected-endpoints',
-          data: [{ pos: sc[0] }, { pos: sc[sc.length-1] }],
+          data: [{ pos: sc[0] }, { pos: sc[sc.length - 1] }],
           getPosition: (d: any) => d.pos,
           getRadius: 8, radiusUnits: 'pixels',
           getFillColor: [0, 212, 255, 255],
@@ -674,48 +815,45 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         data: emergencySvcs,
         getPosition: (d: any) => [d.lon, d.lat],
         getRadius: 26, radiusUnits: 'pixels',
-        getFillColor: (d: any) => { const c = SVC_COLORS[d.type] ?? [255,255,255]; return [...c, 25] as any; },
+        getFillColor: (d: any) => { const c = SVC_COLORS[d.type] ?? [255, 255, 255]; return [...c, 25] as any; },
         pickable: false,
       } as any) as any);
     }
 
     // ── CITY ADMINISTRATIVE BOUNDARY ── Official municipal border from OSM/govt data
-    if (cityBoundary && cityBoundary.length >= 3) {
+    if (cityBoundary) {
       // Outer glow (wide, low opacity)
-      combined.push(new PathLayer({
+      combined.push(new GeoJsonLayer({
         id: 'city-boundary-glow',
-        data: [{ path: [...cityBoundary, cityBoundary[0]] }],
-        getPath: (d: any) => d.path,
-        getColor: [0, 220, 255, 40],
-        getWidth: 14,
-        widthUnits: 'pixels',
-        capRounded: true, jointRounded: true,
+        data: cityBoundary,
+        filled: false,
+        stroked: true,
+        getLineColor: [0, 220, 255, 40],
+        getLineWidth: 14,
+        lineWidthUnits: 'pixels',
         pickable: false,
       }));
       // Mid glow
-      combined.push(new PathLayer({
+      combined.push(new GeoJsonLayer({
         id: 'city-boundary-mid',
-        data: [{ path: [...cityBoundary, cityBoundary[0]] }],
-        getPath: (d: any) => d.path,
-        getColor: [0, 220, 255, 100],
-        getWidth: 4,
-        widthUnits: 'pixels',
-        capRounded: true, jointRounded: true,
+        data: cityBoundary,
+        filled: false,
+        stroked: true,
+        getLineColor: [0, 220, 255, 100],
+        getLineWidth: 4,
+        lineWidthUnits: 'pixels',
         pickable: false,
       }));
       // Crisp inner line
-      combined.push(new PathLayer({
+      combined.push(new GeoJsonLayer({
         id: 'city-boundary-line',
-        data: [{ path: [...cityBoundary, cityBoundary[0]] }],
-        getPath: (d: any) => d.path,
-        getColor: [0, 255, 240, 220],
-        getWidth: 1.5,
-        widthUnits: 'pixels',
-        capRounded: true, jointRounded: true,
+        data: cityBoundary,
+        filled: false,
+        stroked: true,
+        getLineColor: [0, 255, 240, 220],
+        getLineWidth: 1.5,
+        lineWidthUnits: 'pixels',
         pickable: false,
-        getDashArray: [8, 4],
-        dashJustified: true,
-        extensions: [],
       }));
     }
 
@@ -907,10 +1045,10 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         >🚨 {showServices ? 'Hide' : 'Show'} Services</button>
 
         {[
-          { l: 'Roads',    v: edges.length || '–',                c: '#00d4ff' },
-          { l: 'Avg RCI',  v: avgRci ? avgRci.toFixed(1) + '%':'–', c: avgRci>65?'#00ff9d':avgRci>45?'#ffd93d':'#ff3b6b' },
-          { l: 'Critical', v: failingCount || '–',                c: failingCount > 0 ? '#ff3b6b' : '#00ff9d' },
-          { l: 'Crit Idx', v: avgCrit ? avgCrit.toFixed(2):'–',   c: '#ffd93d' },
+          { l: 'Roads', v: edges.length || '–', c: '#00d4ff' },
+          { l: 'Avg RCI', v: avgRci ? avgRci.toFixed(1) + '%' : '–', c: avgRci > 65 ? '#00ff9d' : avgRci > 45 ? '#ffd93d' : '#ff3b6b' },
+          { l: 'Critical', v: failingCount || '–', c: failingCount > 0 ? '#ff3b6b' : '#00ff9d' },
+          { l: 'Crit Idx', v: avgCrit ? avgCrit.toFixed(2) : '–', c: '#ffd93d' },
         ].map(s => (
           <div key={s.l} style={{ textAlign: 'center', minWidth: 66, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '4px 10px' }}>
             <div style={{ fontSize: 9, color: 'rgba(160,200,230,0.5)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 1 }}>{s.l}</div>
@@ -918,9 +1056,10 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           </div>
         ))}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#00ff9d', fontWeight: 700, background: 'rgba(0,255,157,0.08)', border: '1px solid rgba(0,255,157,0.2)', padding: '5px 11px', borderRadius: 10 }}>
-          <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#00ff9d', boxShadow: '0 0 6px #00ff9d', animation: 'pulseGlow 2s infinite' }} />
-          LIVE SAT-LINK {satUpdate % 2 === 0 ? '📡' : '🛰️'}
+        {/* Data source — honest label, no fake LIVE SAT-LINK */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'rgba(160,200,230,0.6)', fontWeight: 600, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '5px 10px', borderRadius: 10 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#4fc3f7', boxShadow: '0 0 5px #4fc3f7' }} />
+          OSM + {baseMapMode === 'satellite' ? 'ESRI Tiles' : baseMapMode === 'street' ? 'CartoDB Tiles' : 'Dark Mode'}
         </div>
       </div>
 
@@ -947,7 +1086,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
                   fontFamily: 'Space Grotesk', fontWeight: 600, cursor: 'pointer', outline: 'none',
                 }}
               >
-                {['Flood','Earthquake','Cyclone','Landslide','Heatwave','Industrial'].map(h => (
+                {['Flood', 'Earthquake', 'Cyclone', 'Landslide', 'Heatwave', 'Industrial'].map(h => (
                   <option key={h} value={h}>{HAZARD_EMOJIS[h]} {h}</option>
                 ))}
               </select>
@@ -959,7 +1098,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
                 <label style={{ fontSize: 11, color: 'rgba(160,200,230,0.6)', fontWeight: 600 }}>Intensity</label>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: intensityColor, boxShadow: `0 0 8px ${intensityColor}` }} />
-                  <span style={{ fontSize: 12, fontWeight: 800, color: intensityColor, fontFamily: 'Space Grotesk' }}>{(intensity*100).toFixed(0)}%</span>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: intensityColor, fontFamily: 'Space Grotesk' }}>{(intensity * 100).toFixed(0)}%</span>
                   <span style={{ fontSize: 10, fontWeight: 700, color: intensityColor, background: `${intensityColor}20`, border: `1px solid ${intensityColor}40`, borderRadius: 6, padding: '1px 6px' }}>{intensityLabel}</span>
                 </div>
               </div>
@@ -991,7 +1130,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               }}
             >
-              {simRunning ? <><div className="spinner" style={{ borderTopColor: '#ff3b6b', width:14, height:14 }} /> Simulating...</> : `${HAZARD_EMOJIS[hazard]} Run Simulation`}
+              {simRunning ? <><div className="spinner" style={{ borderTopColor: '#ff3b6b', width: 14, height: 14 }} /> Simulating...</> : `${HAZARD_EMOJIS[hazard]} Run Simulation`}
             </button>
           </div>
 
@@ -1003,7 +1142,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
             <div style={{ marginBottom: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                 <label style={{ fontSize: 11, color: 'rgba(160,200,230,0.6)', fontWeight: 600 }}>Repair Budget</label>
-                <span style={{ fontSize: 13, fontWeight: 800, color: '#00ff9d', fontFamily: 'Space Grotesk' }}>₹{(budget/1e6).toFixed(1)} Cr</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#00ff9d', fontFamily: 'Space Grotesk' }}>₹{(budget / 1e6).toFixed(1)} Cr</span>
               </div>
               <div style={{ position: 'relative', height: 24, display: 'flex', alignItems: 'center', marginBottom: 4 }}>
                 <div style={{ position: 'absolute', width: '100%', height: 8, background: 'rgba(255,255,255,0.08)', borderRadius: 6, pointerEvents: 'none' }}>
@@ -1029,7 +1168,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               }}
             >
-              {optimizing ? <><div className="spinner" style={{ borderTopColor: '#00ff9d', width:14, height:14 }} /> Optimizing...</> : '🧠 Optimize Network'}
+              {optimizing ? <><div className="spinner" style={{ borderTopColor: '#00ff9d', width: 14, height: 14 }} /> Optimizing...</> : '🧠 Optimize Network'}
             </button>
           </div>
 
@@ -1038,9 +1177,9 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
             <div style={{ padding: '14px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
               <div style={{ fontSize: 11, fontWeight: 800, color: '#ff3b6b', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10 }}>🚨 Emergency Services</div>
               {[
-                { type: 'hospital',     icon: '🏥', label: 'Hospital / Ambulance', col: '#ff3232' },
-                { type: 'fire_station', icon: '🚒', label: 'Fire Station',          col: '#ff8c00' },
-                { type: 'police',       icon: '🚔', label: 'Police Station',        col: '#3c78ff' },
+                { type: 'hospital', icon: '🏥', label: 'Hospital / Ambulance', col: '#ff3232' },
+                { type: 'fire_station', icon: '🚒', label: 'Fire Station', col: '#ff8c00' },
+                { type: 'police', icon: '🚔', label: 'Police Station', col: '#3c78ff' },
               ].map(s => (
                 <div key={s.type} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7, fontSize: 12 }}>
                   <div style={{ width: 10, height: 10, borderRadius: '50%', background: s.col, boxShadow: `0 0 8px ${s.col}`, flexShrink: 0 }} />
@@ -1083,8 +1222,12 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
               {simHistory.length > 0 && (
                 <button
                   onClick={() => {
+                    handleCancelSim();
                     setActiveEventIdx(null);
                     setRepairReport(null);
+                    setSimStages({});
+                    setSimError('');
+                    setSim(false);
                     load();
                     showToast('🔄 Resetting map to 100% Healthy Unsimulated Baseline', 'info');
                   }}
@@ -1105,7 +1248,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
             </div>
             {simHistory.length === 0 ? (
               <div style={{ fontSize: 12, color: 'rgba(160,200,230,0.4)', lineHeight: 1.7, padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px dashed rgba(255,255,255,0.08)' }}>
-                No simulations yet.<br/>Choose a hazard and run!
+                No simulations yet.<br />Choose a hazard and run!
               </div>
             ) : [...simHistory].reverse().map((s, i) => {
               const realIdx = simHistory.length - 1 - i;
@@ -1186,68 +1329,64 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
             </div>
           )}
 
-          {/* ── GOATED GIS DEBUG PANEL ── */}
+          {/* ── GIS TELEMETRY PANEL — collapsible, bottom-right ── */}
           {pipelineStats && !loading && !mapError && (
             <div style={{
-              position: 'absolute', right: 20, bottom: 24, zIndex: 100,
-              background: 'rgba(2,6,16,0.93)',
-              backdropFilter: 'blur(20px)',
-              border: '1px solid rgba(0,212,255,0.3)',
-              borderRadius: 14, padding: '14px 16px',
-              fontFamily: 'Space Grotesk', fontSize: 11,
-              color: '#c8dff0', width: 300,
-              boxShadow: '0 12px 48px rgba(0,0,0,0.7), 0 0 24px rgba(0,212,255,0.08)',
-              pointerEvents: 'none',
+              position: 'absolute', right: 16, bottom: 20, zIndex: 100,
+              fontFamily: 'Space Grotesk', fontSize: 11, color: '#c8dff0',
             }}>
-              {/* Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid rgba(0,212,255,0.2)' }}>
-                <span style={{ fontWeight: 900, fontSize: 11, color: '#00d4ff', letterSpacing: 1.5, textTransform: 'uppercase' }}>⬡ GIS TELEMETRY</span>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#00ff9d', boxShadow: '0 0 8px #00ff9d', animation: 'pulseGlow 1.5s infinite' }} />
-                  <span style={{ color: fps >= 50 ? '#00ff9d' : fps >= 30 ? '#ffd93d' : '#ff3b6b', fontWeight: 900, fontSize: 12 }}>{fps} FPS</span>
-                </div>
-              </div>
-              {/* Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px 8px' }}>
-                {[
-                  { label: 'Projection', value: 'EPSG:4326 → WebMerc', col: '#bd93f9' },
-                  { label: 'Renderer', value: 'DeckGL PathLayer', col: '#bd93f9' },
-                  { label: 'Base Map', value: baseMapMode === 'satellite' ? 'ESRI World Imagery' : baseMapMode === 'street' ? 'CartoDB Dark' : 'Dark (No Tiles)', col: '#4fc3f7' },
-                  { label: 'Zoom', value: (viewState as any).zoom?.toFixed(2) ?? '–', col: '#ffd93d' },
-                  { label: 'Roads Loaded', value: pipelineStats.roadCount.toLocaleString(), col: '#00ff9d' },
-                  { label: 'Junctions', value: pipelineStats.nodeCount.toLocaleString(), col: '#00ff9d' },
-                  { label: 'City', value: cityName.split('(')[0].trim(), col: '#fff' },
-                  { label: 'Source', value: 'OSM Overpass', col: '#fff' },
-                  { label: 'Lon', value: (viewState as any).longitude?.toFixed(5) ?? '–', col: '#ffd93d' },
-                  { label: 'Lat', value: (viewState as any).latitude?.toFixed(5) ?? '–', col: '#ffd93d' },
-                  { label: 'Pitch', value: ((viewState as any).pitch?.toFixed(0) ?? '55') + '°', col: '#aaa' },
-                  { label: 'Bearing', value: ((viewState as any).bearing?.toFixed(0) ?? '-12') + '°', col: '#aaa' },
-                ].map(item => (
-                  <div key={item.label} style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <span style={{ fontSize: 9, color: 'rgba(160,200,230,0.45)', letterSpacing: 0.8, textTransform: 'uppercase' }}>{item.label}</span>
-                    <span style={{ fontWeight: 700, color: item.col, fontSize: 11 }}>{item.value}</span>
+              {/* Collapsed pill — always visible */}
+              <button
+                onClick={() => setShowGisTelemetry(v => !v)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  background: 'rgba(2,6,16,0.93)', backdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(0,212,255,0.28)', borderRadius: 10,
+                  padding: '6px 12px', cursor: 'pointer', color: '#c8dff0',
+                  fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                  marginBottom: showGisTelemetry ? 6 : 0,
+                }}
+              >
+                <span style={{ color: '#00d4ff' }}>⬡ GIS</span>
+                <span style={{ color: '#00ff9d' }}>{pipelineStats.roadCount.toLocaleString()} roads</span>
+                <span style={{ color: fps >= 50 ? '#00ff9d' : fps >= 30 ? '#ffd93d' : '#ff3b6b' }}>{fps} FPS</span>
+                <span style={{ color: 'rgba(160,200,230,0.5)', fontSize: 10 }}>{showGisTelemetry ? '▲' : '▼'}</span>
+              </button>
+
+              {/* Expanded panel */}
+              {showGisTelemetry && (
+                <div style={{
+                  background: 'rgba(2,6,16,0.95)', backdropFilter: 'blur(20px)',
+                  border: '1px solid rgba(0,212,255,0.3)', borderRadius: 12,
+                  padding: '12px 14px', width: 270,
+                  boxShadow: '0 12px 40px rgba(0,0,0,0.7)',
+                  pointerEvents: 'none',
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px 8px', marginBottom: 8 }}>
+                    {[
+                      { label: 'Projection', value: 'EPSG:4326', col: '#bd93f9' },
+                      { label: 'Renderer', value: 'DeckGL WebGL', col: '#bd93f9' },
+                      { label: 'Roads', value: pipelineStats.roadCount.toLocaleString(), col: '#00ff9d' },
+                      { label: 'Junctions', value: pipelineStats.nodeCount.toLocaleString(), col: '#00ff9d' },
+                      { label: 'City', value: cityName.split('(')[0].trim(), col: '#fff' },
+                      { label: 'Source', value: 'OSM Overpass', col: '#4fc3f7' },
+                      { label: 'Lon', value: (viewState as any).longitude?.toFixed(4) ?? '–', col: '#ffd93d' },
+                      { label: 'Lat', value: (viewState as any).latitude?.toFixed(4) ?? '–', col: '#ffd93d' },
+                      { label: 'Zoom', value: (viewState as any).zoom?.toFixed(2) ?? '–', col: '#ffd93d' },
+                      { label: 'Geometry', value: pipelineStats.geometryStatus, col: '#00ff9d' },
+                    ].map(item => (
+                      <div key={item.label} style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        <span style={{ fontSize: 9, color: 'rgba(160,200,230,0.4)', textTransform: 'uppercase', letterSpacing: 0.7 }}>{item.label}</span>
+                        <span style={{ fontWeight: 700, color: item.col, fontSize: 11 }}>{item.value}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              {/* Status bar */}
-              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'rgba(160,200,230,0.45)', fontSize: 10 }}>Geometry</span>
-                  <span style={{ color: '#00ff9d', fontWeight: 700, fontSize: 10 }}>{pipelineStats.geometryStatus}</span>
+                  <div style={{ fontSize: 9, color: 'rgba(160,200,230,0.35)', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 6 }}>
+                    FPS is measured — not estimated. RCI is model-derived from OSM construction year + surface.
+                  </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'rgba(160,200,230,0.45)', fontSize: 10 }}>Backend</span>
-                  <span style={{ color: '#4fc3f7', fontWeight: 700, fontSize: 10 }}>{pipelineStats.backendStatus}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'rgba(160,200,230,0.45)', fontSize: 10 }}>Road Render</span>
-                  <span style={{ color: '#00d4ff', fontWeight: 700, fontSize: 10 }}>PathLayer (Full Polyline)</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'rgba(160,200,230,0.45)', fontSize: 10 }}>Alignment</span>
-                  <span style={{ color: '#00ff9d', fontWeight: 700, fontSize: 10 }}>OSM EPSG:4326 Exact</span>
-                </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -1255,7 +1394,12 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
             <div style={{ position: 'absolute', inset: 0, zIndex: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(4,8,18,0.92)', backdropFilter: 'blur(14px)' }}>
               <div className="spinner" style={{ width: 44, height: 44, borderWidth: 3, marginBottom: 20 }} />
               <div style={{ fontSize: 16, fontWeight: 700, color: '#00d4ff', marginBottom: 6, fontFamily: 'Space Grotesk' }}>{loadMsg}</div>
-              <div style={{ fontSize: 12, color: 'rgba(160,200,230,0.5)' }}>{cityName} — Loading road network...</div>
+              {/* Indeterminate progress — no fake byte counter */}
+              <div style={{ width: 220, height: 3, background: 'rgba(255,255,255,0.08)', borderRadius: 2, overflow: 'hidden', marginBottom: 14, position: 'relative' }}>
+                <div style={{ position: 'absolute', top: 0, left: '-40%', width: '40%', height: '100%', background: 'linear-gradient(90deg, transparent, #00d4ff, transparent)', animation: 'shimmer 1.4s ease infinite' }} />
+              </div>
+              <div style={{ fontSize: 12, color: 'rgba(160,200,230,0.5)' }}>{cityName} — Loading OSM road network...</div>
+              <style>{`@keyframes shimmer { 0% { left: -40%; } 100% { left: 120%; } }`}</style>
             </div>
           )}
 
@@ -1273,7 +1417,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
             controller={true}
             layers={layers}
             style={{ width: '100%', height: '100%' }}
-            parameters={{ clearColor: [7/255, 12/255, 22/255, 1] } as any}
+            parameters={{ clearColor: [7 / 255, 12 / 255, 22 / 255, 1] } as any}
             getCursor={({ isDragging, isHovering }: any) => isDragging ? 'grabbing' : isHovering ? 'pointer' : 'grab'}
           />
 
@@ -1374,7 +1518,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
                 {geoProfile?.scientific_telemetry && (
                   <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
                     <div style={{ fontSize: 9.5, fontWeight: 800, color: '#bd93f9', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6 }}>🔬 21-Param Scientific Telemetry</div>
-                    {(['elevation','seismic_zone','rainfall','soil','geology','groundwater'] as string[]).map(k => {
+                    {(['elevation', 'seismic_zone', 'rainfall', 'soil', 'geology', 'groundwater'] as string[]).map(k => {
                       const t = geoProfile.scientific_telemetry[k];
                       if (!t) return null;
                       return (
@@ -1393,39 +1537,60 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
 
           {/* ── MAP LEGEND PANEL ── */}
           {showLegend && (
-            <div style={{ position: 'absolute', bottom: 24, right: 14, zIndex: 20, background: 'rgba(5, 12, 24, 0.92)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', padding: '12px 16px', backdropFilter: 'blur(16px)', width: 230, boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: '#fff', textTransform: 'uppercase', letterSpacing: 1 }}>📖 Map Legend</span>
+            <div style={{ position: 'absolute', bottom: 24, right: 14, zIndex: 20, background: 'rgba(5, 12, 24, 0.94)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '12px', padding: '12px 16px', backdropFilter: 'blur(16px)', width: 250, boxShadow: '0 6px 24px rgba(0,0,0,0.6)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 800, color: '#fff', textTransform: 'uppercase', letterSpacing: 1 }}>📖 Damage Scale</span>
                 <button onClick={() => setShowLegend(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 13 }}>✕</button>
               </div>
-              <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 14, height: 4, background: '#00ff9d', borderRadius: 2, boxShadow: '0 0 6px #00ff9d' }} />
-                  <span style={{ color: 'var(--text-dim)' }}>Excellent / Good (Fail &lt;20%)</span>
+
+              {/* Scientific label (updates after each assessment) */}
+              {scientificLabel && (
+                <div style={{ fontSize: 10, color: 'rgba(0,212,255,0.8)', fontFamily: 'monospace', background: 'rgba(0,212,255,0.07)', border: '1px solid rgba(0,212,255,0.18)', borderRadius: 6, padding: '4px 8px', marginBottom: 10 }}>
+                  {scientificLabel}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 14, height: 4, background: '#ff8c1e', borderRadius: 2 }} />
-                  <span style={{ color: 'var(--text-dim)' }}>Moderate (Fail 20–40%)</span>
+              )}
+
+              {/* 4-Tier Scale */}
+              <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[
+                  { color: 'rgb(0,220,100)', label: '0–30% Severity', sub: 'Healthy' },
+                  { color: 'rgb(255,160,0)', label: '30–70% Severity', sub: 'Moderate Damage' },
+                  { color: 'rgb(255,220,0)', label: '70–90% Severity', sub: 'Severe Damage' },
+                  { color: 'rgb(255,40,60)', label: '90–100% Severity', sub: 'Critical Failure' },
+                ].map(({ color, label, sub }) => (
+                  <div key={sub} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 22, height: 5, background: color, borderRadius: 3, boxShadow: `0 0 6px ${color}60`, flexShrink: 0 }} />
+                    <div>
+                      <span style={{ color: 'rgba(255,255,255,0.85)', fontWeight: 600 }}>{sub}</span>
+                      <span style={{ color: 'rgba(255,255,255,0.4)', marginLeft: 5 }}>({label})</span>
+                    </div>
+                  </div>
+                ))}
+
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 6, marginTop: 2, display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#00d4ff', border: '2px solid #fff', flexShrink: 0 }} />
+                    <span style={{ color: 'rgba(200,220,255,0.6)' }}>Emergency Unit Node</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 22, height: 3, borderBottom: '2px dashed #00d4ff', flexShrink: 0 }} />
+                    <span style={{ color: 'rgba(200,220,255,0.6)' }}>Evacuation Route</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 22, height: 3, background: 'rgba(0,212,255,0.5)', borderRadius: 2, flexShrink: 0 }} />
+                    <span style={{ color: 'rgba(200,220,255,0.6)' }}>Municipal Boundary</span>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 14, height: 4, background: '#ffd200', borderRadius: 2, boxShadow: '0 0 6px #ffd20080' }} />
-                  <span style={{ color: '#ffd200', fontWeight: 700 }}>⚠ High Risk — Yellow (Fail &gt;40%)</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 14, height: 4, background: '#ff3b6b', borderRadius: 2, boxShadow: '0 0 6px #ff3b6b' }} />
-                  <span style={{ color: '#ff3b6b', fontWeight: 700 }}>🔴 Critical — Red (Fail &gt;70%)</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#00d4ff', border: '2px solid #fff' }} />
-                  <span style={{ color: 'var(--text-dim)' }}>Emergency Unit Node</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 14, height: 4, background: '#00d4ff', borderBottom: '2px dashed #00d4ff' }} />
-                  <span style={{ color: 'var(--text-dim)' }}>Resilient Route Alignment</span>
+
+                {/* Scientific disclaimer */}
+                <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.25)', fontFamily: 'monospace', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 6, marginTop: 2 }}>
+                  ⚠ Susceptibility assessments — not simulations.<br/>
+                  Confidence intervals apply. See Road Inspector.
                 </div>
               </div>
             </div>
           )}
+
 
           {geoData && !selectedRoad && !navStart && !navEnd && (
             <div style={{ position: 'absolute', bottom: 20, left: '50%', transform: 'translateX(-50%)', background: 'rgba(4,8,18,0.88)', border: '1px solid rgba(0,212,255,0.2)', borderRadius: 10, padding: '9px 20px', fontSize: 12, color: 'rgba(160,200,230,0.7)', backdropFilter: 'blur(10px)', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
@@ -1446,7 +1611,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
                 </div>
                 <button onClick={() => setRepairReport(null)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 13, padding: 0 }}>✕</button>
               </div>
-              
+
               <div style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(0, 255, 157, 0.2)', borderRadius: 8, padding: '10px', marginBottom: 10 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#ddd', marginBottom: 5 }}>
                   <span>Budget Spent:</span>
@@ -1465,7 +1630,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
               <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(160,200,230,0.85)', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 8 }}>
                 Repaired Segments (Click to Inspect):
               </div>
-              
+
               <div style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 4 }}>
                 {repairReport.repair_report && repairReport.repair_report.length > 0 ? (
                   repairReport.repair_report.map((item: any, i: number) => (
@@ -1573,24 +1738,35 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
           )}
 
           <div style={{ padding: '14px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12 }}>📊 RCI Distribution</div>
-            <div style={{ height: 130 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={rciHist} margin={{ top: 4, right: 0, bottom: 0, left: -28 }}>
-                  <defs>
-                    <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#00d4ff" stopOpacity={0.4}/>
-                      <stop offset="95%" stopColor="#00d4ff" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
-                  <XAxis dataKey="range" stroke="rgba(160,200,230,0.25)" tick={{ fontSize: 8 }} />
-                  <YAxis stroke="rgba(160,200,230,0.25)" tick={{ fontSize: 8 }} />
-                  <Tooltip contentStyle={{ background:'rgba(4,8,18,0.95)', border:'1px solid rgba(0,212,255,0.3)', borderRadius:8, fontSize:11 }} labelStyle={{ color:'#00d4ff' }} itemStyle={{ color:'#ddd' }} />
-                  <Area type="monotone" dataKey="count" stroke="#00d4ff" strokeWidth={2} fill="url(#ag)" dot={false} />
-                </AreaChart>
-              </ResponsiveContainer>
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>📊 RCI Distribution</div>
+            <div style={{ fontSize: 9.5, color: 'rgba(160,200,230,0.4)', marginBottom: 8, lineHeight: 1.5 }}>
+              {rciModeledCount > 0
+                ? `${rciModeledCount.toLocaleString()} model-derived · Source: InfrastructureIntelligenceEngine`
+                : 'No RCI data — run a simulation first'}
             </div>
+            {rciModeledCount === 0 ? (
+              <div style={{ height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(160,200,230,0.3)', fontSize: 12, fontStyle: 'italic', border: '1px dashed rgba(255,255,255,0.08)', borderRadius: 8 }}>
+                Insufficient data
+              </div>
+            ) : (
+              <div style={{ height: 130 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={rciHist} margin={{ top: 4, right: 0, bottom: 0, left: -28 }}>
+                    <defs>
+                      <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#00d4ff" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#00d4ff" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
+                    <XAxis dataKey="range" stroke="rgba(160,200,230,0.25)" tick={{ fontSize: 7 }} />
+                    <YAxis stroke="rgba(160,200,230,0.25)" tick={{ fontSize: 8 }} />
+                    <Tooltip contentStyle={{ background: 'rgba(4,8,18,0.95)', border: '1px solid rgba(0,212,255,0.3)', borderRadius: 8, fontSize: 11 }} labelStyle={{ color: '#00d4ff' }} itemStyle={{ color: '#ddd' }} />
+                    <Area type="monotone" dataKey="count" stroke="#00d4ff" strokeWidth={2} fill="url(#ag)" dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
 
           <div style={{ padding: '14px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
@@ -1601,39 +1777,51 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
                   <CartesianGrid stroke="rgba(255,255,255,0.04)" strokeDasharray="3 3" />
                   <XAxis dataKey="t" stroke="rgba(160,200,230,0.25)" tick={{ fontSize: 8 }} />
                   <YAxis domain={[0, 100]} stroke="rgba(160,200,230,0.25)" tick={{ fontSize: 8 }} />
-                  <Tooltip contentStyle={{ background:'rgba(4,8,18,0.95)', border:'1px solid rgba(0,212,255,0.3)', borderRadius:8, fontSize:11 }} labelStyle={{ color:'#00d4ff' }} itemStyle={{ color:'#ddd' }} />
-                  <Line type="monotone" dataKey="GCC"   stroke="#00d4ff" strokeWidth={2.5} dot={{ fill:'#00d4ff', r:3 }} name="GCC %" />
-                  <Line type="monotone" dataKey="Reach" stroke="#00ff9d" strokeWidth={2.5} dot={{ fill:'#00ff9d', r:3 }} name="Reach %" />
+                  <Tooltip contentStyle={{ background: 'rgba(4,8,18,0.95)', border: '1px solid rgba(0,212,255,0.3)', borderRadius: 8, fontSize: 11 }} labelStyle={{ color: '#00d4ff' }} itemStyle={{ color: '#ddd' }} />
+                  <Line type="monotone" dataKey="GCC" stroke="#00d4ff" strokeWidth={2.5} dot={{ fill: '#00d4ff', r: 3 }} name="GCC %" />
+                  <Line type="monotone" dataKey="Reach" stroke="#00ff9d" strokeWidth={2.5} dot={{ fill: '#00ff9d', r: 3 }} name="Reach %" />
                 </LineChart>
               </ResponsiveContainer>
             </div>
             <div style={{ display: 'flex', gap: 14, marginTop: 6 }}>
-              {[['#00d4ff','Giant Component'], ['#00ff9d','Reachability']].map(([c, l]) => (
-                <div key={l} style={{ display:'flex', alignItems:'center', gap:5, fontSize:9, color:'rgba(160,200,230,0.5)' }}>
-                  <div style={{ width:14, height:3, background: c, borderRadius:1 }} /><span>{l}</span>
+              {[['#00d4ff', 'Giant Component'], ['#00ff9d', 'Reachability']].map(([c, l]) => (
+                <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 9, color: 'rgba(160,200,230,0.5)' }}>
+                  <div style={{ width: 14, height: 3, background: c, borderRadius: 1 }} /><span>{l}</span>
                 </div>
               ))}
             </div>
           </div>
 
+          {/* Network Health — with RCI provenance (MODELED from InfraIntelligenceEngine, not MEASURED) */}
           <div style={{ padding: '14px' }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12 }}>🌐 Network Health</div>
-            {[
-              { l: 'Excellent', v: edges.filter((f: any) => (f.properties?.rci ?? 0) > 80).length, col: '#00ff9d' },
-              { l: 'Moderate',  v: edges.filter((f: any) => { const r = f.properties?.rci ?? 0; return r >= 50 && r <= 80; }).length, col: '#ffd93d' },
-              { l: 'Poor',      v: edges.filter((f: any) => (f.properties?.rci ?? 0) < 50).length, col: '#ff7b35' },
-              { l: 'Critical',  v: failingCount, col: '#ff3b6b' },
+            <div style={{ fontSize: 11, fontWeight: 800, color: '#00d4ff', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>🌐 Network Health</div>
+            <div style={{ fontSize: 10, color: 'rgba(160,200,230,0.4)', marginBottom: 10, lineHeight: 1.5 }}>
+              RCI: {rciModeledCount.toLocaleString()} model-derived · {rciUnavailableCount > 0 ? `${rciUnavailableCount.toLocaleString()} no data` : 'all computed'}
+            </div>
+            {rciModeledCount === 0 ? (
+              <div style={{ fontSize: 12, color: 'rgba(160,200,230,0.4)', fontStyle: 'italic', padding: '8px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px dashed rgba(255,255,255,0.08)' }}>
+                No RCI data available yet.
+              </div>
+            ) : [
+              { l: 'RCI > 80 (Good)', v: edges.filter((f: any) => (f.properties?.rci ?? 0) > 80 && f.properties?.rci != null).length, col: '#00ff9d' },
+              { l: 'RCI 50–80 (Fair)', v: edges.filter((f: any) => { const r = f.properties?.rci; return r != null && r >= 50 && r <= 80; }).length, col: '#ffd93d' },
+              { l: 'RCI < 50 (Poor)', v: edges.filter((f: any) => f.properties?.rci != null && (f.properties.rci) < 50).length, col: '#ff7b35' },
+              { l: 'Fail Prob > 70% (Critical)', v: failingCount, col: '#ff3b6b' },
             ].map(row => (
-              <div key={row.l} style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
-                  <span style={{ color: 'rgba(160,200,230,0.65)' }}>{row.l} Roads</span>
-                  <span style={{ fontWeight: 800, color: row.col, fontFamily: 'Space Grotesk' }}>{row.v}</span>
+              <div key={row.l} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
+                  <span style={{ color: 'rgba(160,200,230,0.65)' }}>{row.l}</span>
+                  <span style={{ fontWeight: 800, color: row.col, fontFamily: 'Space Grotesk' }}>{row.v.toLocaleString()}</span>
                 </div>
-                <div style={{ height: 6, background: 'rgba(255,255,255,0.07)', borderRadius: 6, overflow: 'hidden' }}>
-                  <div style={{ width: edges.length ? `${(row.v / edges.length) * 100}%` : '0%', height: '100%', background: row.col, boxShadow: `0 0 8px ${row.col}60`, borderRadius: 6, transition: 'width 1s ease' }} />
+                <div style={{ height: 5, background: 'rgba(255,255,255,0.07)', borderRadius: 5, overflow: 'hidden' }}>
+                  <div style={{ width: edges.length ? `${(row.v / edges.length) * 100}%` : '0%', height: '100%', background: row.col, boxShadow: `0 0 6px ${row.col}50`, borderRadius: 5, transition: 'width 1s ease' }} />
                 </div>
               </div>
             ))}
+            <div style={{ marginTop: 8, fontSize: 9, color: 'rgba(160,200,230,0.3)', fontStyle: 'italic', lineHeight: 1.5 }}>
+              SOURCE: InfrastructureIntelligenceEngine — Pavement Deterioration Model<br/>
+              (construction year + surface type → RCI estimate). Not field-measured.
+            </div>
           </div>
         </div>
       </div>
@@ -1671,11 +1859,105 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         );
       })()}
 
-      {/* ── LOADING OVERLAY ── */}
-      {(simRunning || optimizing) && (
-        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 100, background: 'rgba(4,8,18,0.96)', backdropFilter: 'blur(20px)', borderTop: '1px solid rgba(0,212,255,0.2)', padding: '12px 28px', display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div className="spinner" style={{ borderTopColor: simRunning ? '#ff3b6b' : '#00ff9d' }} />
-          <span style={{ fontSize: 14, color: simRunning ? '#ff3b6b' : '#00ff9d', fontWeight: 700 }}>{loadMsg}</span>
+      {/* ── 9-STAGE SCIENTIFIC PROGRESS BAR — driven by simStatus state machine ── */}
+      {(simStatus !== 'READY' || optimizing) && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
+          background: 'rgba(3, 8, 16, 0.97)', backdropFilter: 'blur(24px)',
+          borderTop: '1px solid rgba(0,212,255,0.25)',
+          padding: '14px 28px 16px',
+        }}>
+          {/* Stage label row */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {simRunning && <div className="spinner" style={{ borderTopColor: simError ? '#ff3b6b' : '#00ff9d', width: 16, height: 16, borderWidth: 2, flexShrink: 0 }} />}
+                <span style={{ fontSize: 13, color: simError ? '#ff3b6b' : simRunning ? '#00ff9d' : '#00d4ff', fontWeight: 800, fontFamily: 'Space Grotesk' }}>
+                  {optimizing ? '🧠 Optimizing Network...' : simError ? '⚠️ Simulation Failed' : simRunning ? `⚡ ${hazard} Assessment Running...` : '✅ Simulation Complete'}
+                </span>
+              </div>
+              {scientificLabel && (
+                <span style={{
+                  fontSize: 11, color: 'rgba(0,212,255,0.8)', fontFamily: 'monospace',
+                  background: 'rgba(0,212,255,0.08)', border: '1px solid rgba(0,212,255,0.2)',
+                  borderRadius: 6, padding: '2px 8px',
+                }}>
+                  {scientificLabel}
+                </span>
+              )}
+            </div>
+            
+            {!optimizing && (
+              <div style={{ display: 'flex', gap: 10 }}>
+                {simRunning && (
+                  <button onClick={handleCancelSim} style={{ background: 'rgba(255,59,107,0.15)', border: '1px solid rgba(255,59,107,0.3)', color: '#ff3b6b', borderRadius: 6, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                    🛑 Cancel Simulation
+                  </button>
+                )}
+                <button onClick={() => {
+                  handleCancelSim();
+                  setActiveEventIdx(null);
+                  setRepairReport(null);
+                  setSimStages({});
+                  setSimError('');
+                  setSim(false);
+                  load();
+                  showToast('🔄 Resetting map to 100% Healthy Unsimulated Baseline', 'info');
+                }} style={{ background: 'rgba(0,212,255,0.15)', border: '1px solid rgba(0,212,255,0.3)', color: '#00d4ff', borderRadius: 6, padding: '4px 12px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                  🔄 Reset Baseline
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 9 stage dots */}
+          {!optimizing && (() => {
+            const STAGE_NAMES = ['GIS','DEM','Roads','Weather','Hazard Data','Scientific Models','Graph Analysis','Digital Twin','Rendering'];
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 8 }}>
+                {STAGE_NAMES.map((name, i) => {
+                  const stateInfo = simStages[name];
+                  const status = stateInfo?.status || 'pending';
+                  const active = status === 'running';
+                  const done = status === 'completed';
+                  const failed = status === 'failed';
+                  
+                  let bg = 'rgba(255,255,255,0.08)';
+                  let shadow = 'none';
+                  let col = 'rgba(255,255,255,0.25)';
+                  
+                  if (done) { bg = '#00ff9d'; shadow = '0 0 6px #00ff9d40'; col = '#00ff9d'; }
+                  else if (failed) { bg = '#ff3b6b'; shadow = '0 0 8px #ff3b6b'; col = '#ff3b6b'; }
+                  else if (active) { bg = '#00d4ff'; shadow = '0 0 8px #00d4ff'; col = '#00d4ff'; }
+                  
+                  return (
+                    <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                      <div style={{
+                        height: 4, width: '90%',
+                        background: bg, borderRadius: 2, transition: 'background 0.3s', boxShadow: shadow,
+                      }} />
+                      <span style={{
+                        fontSize: 9.5, color: col, fontFamily: 'Space Grotesk', fontWeight: (active || done || failed) ? 700 : 500,
+                        whiteSpace: 'nowrap', transition: 'color 0.3s',
+                      }}>{name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Error and Model info */}
+          {simError && (
+             <div style={{ fontSize: 11, color: '#ff3b6b', fontFamily: 'monospace', marginTop: 4, background: 'rgba(255,59,107,0.1)', padding: '4px 8px', borderRadius: 4 }}>
+               {simError}
+             </div>
+          )}
+          {modelUsed && !simError && (
+            <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.35)', fontFamily: 'monospace', marginTop: 2 }}>
+              Model: {modelUsed}
+            </div>
+          )}
         </div>
       )}
 

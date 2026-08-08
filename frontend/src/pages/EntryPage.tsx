@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import bgCar from '../assets/bg_auth.png';
+import bgSunsetCar from '../assets/bg_sunset_car.jpg';
 
 interface Props {
   onVisitWebsite: () => void;
@@ -55,15 +55,15 @@ export default function EntryPage({ onVisitWebsite, onFilePetition }: Props) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 100,
-      backgroundImage: `url(${bgCar})`,
-      backgroundSize: 'cover', backgroundPosition: 'center bottom',
+      backgroundImage: `url(${bgSunsetCar})`,
+      backgroundSize: 'cover', backgroundPosition: 'center center',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      overflow: 'hidden', fontFamily: "'Space Grotesk', sans-serif"
+      overflow: 'hidden', fontFamily: "'Outfit', 'Space Grotesk', sans-serif"
     }}>
-      {/* Dark overlay - heavier at top, lighter at bottom to show car */}
+      {/* Balanced vignette gradient to make text readable while preserving the sunset artwork */}
       <div style={{
         position: 'absolute', inset: 0, zIndex: 1,
-        background: 'linear-gradient(180deg, rgba(2,4,10,0.92) 0%, rgba(3,5,12,0.7) 40%, rgba(4,6,14,0.65) 70%, rgba(2,3,8,0.88) 100%)',
+        background: 'linear-gradient(180deg, rgba(4, 6, 16, 0.45) 0%, rgba(4, 6, 16, 0.15) 35%, rgba(4, 6, 16, 0.25) 70%, rgba(2, 3, 8, 0.8) 100%)',
       }} />
 
       {/* Ember canvas */}

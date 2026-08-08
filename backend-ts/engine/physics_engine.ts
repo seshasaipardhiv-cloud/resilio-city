@@ -1,5 +1,6 @@
 import { GraphNode, GraphEdge, EnvironmentalTelemetry } from './types.js';
 import { DisasterPhysicsEngine } from './disaster_physics.js';
+import { CascadeSimulationEngine } from './cascade_engine.js';
 
 /**
  * Backward Compatible Physics Simulation Engine
@@ -26,15 +27,18 @@ export class PhysicsSimulationEngine {
       edgesToAnalyze = edges.filter(e => targetSet.has(e.id) || (e.road_name && targetSet.has(e.road_name)));
     }
 
-    const affectedSet = new Set<string>();
-    const totalStats = {
+    const totalStats: Record<string, any> = {
       total_edges_assessed: edges.length,
       bridges_damaged: 0,
       arterials_flooded: 0,
       collapses_detected: 0,
-      average_network_rci_drop: 0
+      average_network_rci_drop: 0,
+      model_used: 'Unknown',
+      scientific_label: 'Unknown Assessment',
+      assessment_type: 'unknown',
     };
 
+    const affectedSet = new Set<string>();
     // Temporal Simulation: Step 1 (Primary Hazard), Step 2 & 3 (Cascades)
     const timeSteps = 3;
     let currentPrimaryAffected: string[] = [];
@@ -54,12 +58,14 @@ export class PhysicsSimulationEngine {
         currentPrimaryAffected = affectedEdges;
 
         totalStats.bridges_damaged += stats.bridges_structurally_compromised || 0;
-        totalStats.arterials_flooded += stats.arterials_submerged || 0;
-        totalStats.collapses_detected += stats.seismic_collapses_detected || 0;
+        totalStats.arterials_flooded += stats.arterials_affected || stats.arterials_submerged || 0;
+        totalStats.collapses_detected += stats.collapses_detected || stats.seismic_collapses_detected || 0;
         totalStats.average_network_rci_drop = stats.mean_rci_degradation || 0;
+        totalStats.model_used = stats.model_used || 'Unknown';
+        totalStats.scientific_label = stats.scientific_label || 'Unknown Assessment';
+        totalStats.assessment_type = stats.assessment_type || 'unknown';
       } else {
         // Step 2 and 3: Secondary Cascades (e.g. Traffic Congestion spreading)
-        const { CascadeSimulationEngine } = require('./cascade_engine.js');
         if (CascadeSimulationEngine && CascadeSimulationEngine.executeCascades) {
           CascadeSimulationEngine.executeCascades(
             nodes,

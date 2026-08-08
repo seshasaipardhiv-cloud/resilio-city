@@ -37,14 +37,29 @@ export interface ModelProvenance {
   input_datasets: string[];
   prediction_timestamp: string;
   confidence_pct: number;
+  /** Lower confidence interval bound (e.g. -30 means -30% of predicted value) */
+  confidence_interval_lower_pct?: number;
+  /** Upper confidence interval bound */
+  confidence_interval_upper_pct?: number;
+  /** Root Mean Squared Error from validation study */
+  rmse?: number | string;
+  /** Mean Absolute Error from validation study */
+  mae?: number | string;
+  /** Published scientific validation dataset name */
+  calibration_dataset?: string;
+  /** Peer-reviewed publication supporting this model */
+  scientific_publication?: string;
   limitations: string[];
   calibration_status: 'Locally Calibrated' | 'Transferred Approximation' | 'Experimental';
+  /** If this is a fallback, this names the primary model that could not be run */
+  fallback_from?: string;
   validation_metrics: {
     dataset: string;
     metric: string;
     value: number | string;
   };
 }
+
 
 export interface GraphEdge {
   id: string;
@@ -111,6 +126,7 @@ export interface CityRoadGraph {
   nodes: Record<string, GraphNode>;
   edges: GraphEdge[];
   telemetry: EnvironmentalTelemetry;
+  boundary_polygon?: any;
 }
 
 export interface RecoveryAction {

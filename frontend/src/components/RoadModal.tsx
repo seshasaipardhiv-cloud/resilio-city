@@ -691,38 +691,93 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
               </div>
             </div>
 
-            {/* Provenance Metadata Box */}
+            {/* Scientific Provenance & Uncertainty Panel */}
             {p.provenance && (
-              <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px dashed rgba(255, 255, 255, 0.1)', borderRadius: '14px', padding: '14px' }}>
-                <div style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span>🔬</span> Scientific Provenance
+              <div style={{ background: 'rgba(0,0,0,0.3)', border: '1px dashed rgba(0,212,255,0.25)', borderRadius: '14px', padding: '14px' }}>
+                <div style={{ fontSize: 11, color: 'rgba(0,212,255,0.9)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span>🔬</span> Scientific Model Provenance
                 </div>
-                
+
+                {/* Assessment type warning */}
+                {p.provenance.fallback_from && (
+                  <div style={{ background: 'rgba(255,160,0,0.1)', border: '1px solid rgba(255,160,0,0.3)', borderRadius: 8, padding: '7px 10px', marginBottom: 10, fontSize: 10, color: 'rgba(255,160,0,0.9)', fontFamily: 'monospace' }}>
+                    ⚠ PRIMARY MODEL UNAVAILABLE<br/>
+                    <span style={{ color: 'rgba(255,255,255,0.5)' }}>{p.provenance.fallback_from}</span>
+                  </div>
+                )}
+
+                {/* Model + version */}
                 <div style={{ marginBottom: 6 }}>
-                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Model: </span>
-                  <span style={{ fontSize: 11, color: '#00d4ff', fontFamily: 'var(--font-mono)' }}>{p.provenance.model_name} v{p.provenance.version}</span>
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Model: </span>
+                  <span style={{ fontSize: 11, color: '#00d4ff', fontFamily: 'monospace' }}>{p.provenance.model_name} v{p.provenance.version}</span>
                 </div>
-                
+
+                {/* Scientific publication */}
+                {p.provenance.scientific_publication && (
+                  <div style={{ marginBottom: 6 }}>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Publication: </span>
+                    <span style={{ fontSize: 10, color: 'rgba(0,255,157,0.8)', fontFamily: 'monospace' }}>{p.provenance.scientific_publication}</span>
+                  </div>
+                )}
+
+                {/* Confidence + interval */}
+                <div style={{ marginBottom: 6, display: 'flex', gap: 12 }}>
+                  <div>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Confidence: </span>
+                    <span style={{ fontSize: 11, color: '#fff', fontFamily: 'monospace' }}>{p.provenance.confidence_pct}%</span>
+                  </div>
+                  {(p.provenance.confidence_interval_lower_pct !== undefined) && (
+                    <div>
+                      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>CI: </span>
+                      <span style={{ fontSize: 11, color: 'rgba(255,160,0,0.9)', fontFamily: 'monospace' }}>
+                        {p.provenance.confidence_interval_lower_pct > 0 ? '+' : ''}{p.provenance.confidence_interval_lower_pct}% / +{p.provenance.confidence_interval_upper_pct}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* RMSE / MAE */}
+                {(p.provenance.rmse || p.provenance.mae) && (
+                  <div style={{ marginBottom: 6, display: 'flex', gap: 12 }}>
+                    {p.provenance.rmse && <div><span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>RMSE: </span><span style={{ fontSize: 10, color: 'rgba(255,220,0,0.9)', fontFamily: 'monospace' }}>{p.provenance.rmse}</span></div>}
+                    {p.provenance.mae && <div><span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>MAE: </span><span style={{ fontSize: 10, color: 'rgba(255,220,0,0.9)', fontFamily: 'monospace' }}>{p.provenance.mae}</span></div>}
+                  </div>
+                )}
+
+                {/* Calibration */}
                 <div style={{ marginBottom: 6 }}>
-                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Confidence: </span>
-                  <span style={{ fontSize: 11, color: '#fff', fontFamily: 'var(--font-mono)' }}>{p.provenance.confidence_pct}%</span>
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Calibration: </span>
+                  <span style={{ fontSize: 10, color: p.provenance.calibration_status === 'Locally Calibrated' ? '#00ff9d' : 'rgba(255,160,0,0.9)', fontFamily: 'monospace' }}>{p.provenance.calibration_status}</span>
                 </div>
-                
-                <div style={{ marginBottom: 6 }}>
-                  <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>Validation: </span>
-                  <span style={{ fontSize: 11, color: 'var(--yellow)', fontFamily: 'var(--font-mono)' }}>{p.provenance.validation_metrics?.value || 'Uncalibrated'}</span>
-                </div>
-                
+                {p.provenance.calibration_dataset && (
+                  <div style={{ marginBottom: 6 }}>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Dataset: </span>
+                    <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', fontFamily: 'monospace' }}>{p.provenance.calibration_dataset}</span>
+                  </div>
+                )}
+
+                {/* Limitations */}
                 {p.provenance.limitations && p.provenance.limitations.length > 0 && (
-                  <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 8 }}>
-                    <span style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600 }}>⚠ Known Limitations:</span>
-                    <ul style={{ paddingLeft: 12, margin: '4px 0 0 0', fontSize: 10, color: 'rgba(255,255,255,0.6)', listStyleType: 'circle' }}>
+                  <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 8 }}>
+                    <span style={{ fontSize: 10, color: 'rgba(255,80,80,0.9)', fontWeight: 700 }}>⚠ Known Limitations:</span>
+                    <ul style={{ paddingLeft: 12, margin: '4px 0 0 0', fontSize: 10, color: 'rgba(255,255,255,0.55)', listStyleType: 'circle', lineHeight: 1.5 }}>
                       {p.provenance.limitations.map((lim: string, i: number) => <li key={i} style={{ marginBottom: 2 }}>{lim}</li>)}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Input datasets */}
+                {p.provenance.input_datasets && p.provenance.input_datasets.length > 0 && (
+                  <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 8 }}>
+                    <span style={{ fontSize: 10, color: 'rgba(0,212,255,0.7)', fontWeight: 700 }}>📡 Input Datasets:</span>
+                    <ul style={{ paddingLeft: 12, margin: '4px 0 0 0', fontSize: 10, color: 'rgba(255,255,255,0.45)', listStyleType: 'disc', lineHeight: 1.5 }}>
+                      {p.provenance.input_datasets.map((ds: string, i: number) => <li key={i}>{ds}</li>)}
                     </ul>
                   </div>
                 )}
               </div>
             )}
+
 
             {/* Multi-Modal Routing Triggers */}
             <div style={{ display: 'flex', gap: '8px', width: '100%' }}>
@@ -816,9 +871,9 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
                   <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: row.c || '#fff', textAlign: 'right' }}>{String(row.v)}</span>
                 </div>
               ))}
-              <div style={{ marginTop: 8, fontSize: 10, color: '#00ff66', fontFamily: 'var(--font-mono)', display: 'flex', justifyContent: 'space-between', fontWeight: 700 }}>
-                <span>✓ 0% FAKE GENERATION</span>
-                <span>STATUS: LIVE</span>
+              <div style={{ marginTop: 8, fontSize: 10, color: 'rgba(160,200,230,0.5)', fontFamily: 'var(--font-mono)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>SOURCE: Open-Meteo weather + OSM geometry</span>
+                <span>NOTE: Some values are model defaults</span>
               </div>
             </div>
 
@@ -977,8 +1032,8 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
                       <span style={{ fontSize: 13, fontWeight: 800, color: '#ff8400', textTransform: 'uppercase', letterSpacing: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
                         🚦 TRAFFIC DATA PROVIDER
                       </span>
-                      <span style={{ background: (p.traffic_status || p.current_speed_kmh) ? 'rgba(0,255,157,0.15)' : 'rgba(255,59,107,0.2)', border: `1px solid ${(p.traffic_status || p.current_speed_kmh) ? '#00ff9d' : '#ff3b6b'}`, color: (p.traffic_status || p.current_speed_kmh) ? '#00ff9d' : '#ff3b6b', padding: '2px 8px', borderRadius: '6px', fontSize: 10, fontWeight: 700 }}>
-                        {(p.traffic_status || p.current_speed_kmh) ? '[LIVE]' : '[UNAVAILABLE]'}
+                      <span style={{ background: p.traffic_status ? 'rgba(0,255,157,0.15)' : 'rgba(255,180,0,0.18)', border: `1px solid ${p.traffic_status ? '#00ff9d' : 'var(--yellow)'}`, color: p.traffic_status ? '#00ff9d' : 'var(--yellow)', padding: '2px 8px', borderRadius: '6px', fontSize: 10, fontWeight: 700 }}>
+                        {p.traffic_status ? '[TRAFFIC API]' : p.current_speed_kmh ? '[OSM SPEED LIMIT]' : '[UNAVAILABLE]'}
                       </span>
                     </div>
 
@@ -990,19 +1045,35 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-dim)' }}>Telematics Provider:</span>
-                          <span style={{ fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>{p.traffic_status?.provider ?? (p.lanes >= 6 ? 'Google Maps Platform' : (p.lanes >= 4 ? 'HERE Traffic API' : 'TomTom Traffic API'))} <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span></span>
+                          <span style={{ fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>
+                            {p.traffic_status?.provider ?? 'No traffic API — OSM speed limit only'}
+                            {p.traffic_status?.provider ? <span style={{ color: '#00ff9d', fontSize: 10 }}> [TRAFFIC API]</span> : <span style={{ color: 'var(--yellow)', fontSize: 10 }}> [OSM ONLY]</span>}
+                          </span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-dim)' }}>Live Average Speed:</span>
-                          <span style={{ fontWeight: 800, color: (p.current_speed_kmh ?? 45) < 25 ? 'var(--red)' : 'var(--green)', fontFamily: 'var(--font-mono)', fontSize: 14 }}>{p.current_speed_kmh ?? p.speed_limit_kmh ?? 45} km/h <span style={{ color: '#00ff9d', fontSize: 10, fontWeight: 700 }}>[LIVE]</span></span>
+                          <span style={{ fontWeight: 800, color: (p.current_speed_kmh ?? 45) < 25 ? 'var(--red)' : 'var(--green)', fontFamily: 'var(--font-mono)', fontSize: 14 }}>
+                            {p.current_speed_kmh ?? p.speed_limit_kmh ?? 45} km/h
+                            {p.current_speed_kmh
+                              ? <span style={{ color: '#00ff9d', fontSize: 10, fontWeight: 700 }}> [MEASURED]</span>
+                              : <span style={{ color: 'var(--yellow)', fontSize: 10 }}> [OSM SPEED LIMIT]</span>}
+                          </span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-dim)' }}>Congestion Index:</span>
-                          <span style={{ fontWeight: 700, color: (p.traffic_status?.congestion_coefficient ?? 1.15) > 1.8 ? 'var(--red)' : 'var(--yellow)', fontFamily: 'var(--font-mono)' }}>{(p.traffic_status?.congestion_coefficient ?? 1.15).toFixed(2)}x Free-Flow <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span></span>
+                          <span style={{ fontWeight: 700, color: (p.traffic_status?.congestion_coefficient ?? null) !== null && p.traffic_status.congestion_coefficient > 1.8 ? 'var(--red)' : 'var(--yellow)', fontFamily: 'var(--font-mono)' }}>
+                            {p.traffic_status?.congestion_coefficient != null
+                              ? <>{p.traffic_status.congestion_coefficient.toFixed(2)}x Free-Flow <span style={{ color: '#00ff9d', fontSize: 10 }}>[API]</span></>
+                              : <>N/A <span style={{ color: 'rgba(160,200,230,0.4)', fontSize: 10 }}>[NO CONGESTION DATA]</span></>}
+                          </span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-dim)' }}>Actual Travel Time:</span>
-                          <span style={{ fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>{p.travel_time_seconds ?? Math.round(((p.length ?? p.length_meters ?? 1500) / (((p.current_speed_kmh ?? 40) * 1000)/3600)) * 10)/10} sec <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span></span>
+                          <span style={{ fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>
+                            {p.travel_time_seconds
+                              ? <>{p.travel_time_seconds} sec <span style={{ color: '#00ff9d', fontSize: 10 }}>[MEASURED]</span></>
+                              : <>{Math.round(((p.length ?? p.length_meters ?? 1500) / (((p.current_speed_kmh ?? 40) * 1000) / 3600)) * 10) / 10} sec <span style={{ color: 'var(--yellow)', fontSize: 10 }}>[CALCULATED]</span></>}
+                          </span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 8 }}>
                           <span style={{ color: 'var(--text-dim)' }}>Road Closures & Incidents:</span>
@@ -1070,8 +1141,8 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
                       <span style={{ fontSize: 13, fontWeight: 800, color: '#00e5ff', textTransform: 'uppercase', letterSpacing: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
                         🛰️ COPERNICUS & OPEN-METEO TELEMETRY
                       </span>
-                      <span style={{ background: p.satellite_observations || p.satellite_telemetry ? 'rgba(0,255,157,0.15)' : 'rgba(255,180,0,0.2)', border: `1px solid ${p.satellite_observations || p.satellite_telemetry ? '#00ff9d' : 'var(--yellow)'}`, color: p.satellite_observations || p.satellite_telemetry ? '#00ff9d' : 'var(--yellow)', padding: '2px 8px', borderRadius: '6px', fontSize: 10, fontWeight: 700 }}>
-                        {p.satellite_observations || p.satellite_telemetry ? '[LIVE]' : '[CACHED / BACKUP]'}
+                      <span style={{ background: p.satellite_observations || p.satellite_telemetry ? 'rgba(0,180,255,0.15)' : 'rgba(255,180,0,0.15)', border: `1px solid ${p.satellite_observations || p.satellite_telemetry ? '#4fc3f7' : 'var(--yellow)'}`, color: p.satellite_observations || p.satellite_telemetry ? '#4fc3f7' : 'var(--yellow)', padding: '2px 8px', borderRadius: '6px', fontSize: 10, fontWeight: 700 }}>
+                        {p.satellite_observations ? '[SATELLITE]' : p.satellite_telemetry ? '[OPEN-METEO]' : '[NO DATA]'}
                       </span>
                     </div>
 
@@ -1083,23 +1154,45 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-dim)' }}>Orbital Radar Source:</span>
-                          <span style={{ fontWeight: 700, color: '#fff' }}>Copernicus Sentinel-1 SAR C-Band <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span></span>
+                          <span style={{ fontWeight: 700, color: '#fff' }}>
+                            {p.satellite_observations ? 'Copernicus Sentinel-1 SAR C-Band' : 'Not available'}
+                            <span style={{ color: p.satellite_observations ? '#4fc3f7' : 'rgba(160,200,230,0.4)', fontSize: 10 }}>
+                              {p.satellite_observations ? ' [SATELLITE]' : ' [UNAVAILABLE]'}
+                            </span>
+                          </span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-dim)' }}>Meteorological Sensing:</span>
-                          <span style={{ fontWeight: 700, color: '#fff' }}>Open-Meteo Primary Feed <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span></span>
+                          <span style={{ fontWeight: 700, color: '#fff' }}>
+                            {p.satellite_telemetry ? 'Open-Meteo Weather API' : 'Not available'}
+                            <span style={{ color: p.satellite_telemetry ? '#00ff9d' : 'rgba(160,200,230,0.4)', fontSize: 10 }}>
+                              {p.satellite_telemetry ? ' [OPEN-METEO]' : ' [UNAVAILABLE]'}
+                            </span>
+                          </span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-dim)' }}>Surface Temperature:</span>
-                          <span style={{ fontWeight: 800, color: '#ffb400', fontFamily: 'var(--font-mono)', fontSize: 14 }}>{p.satellite_observations?.surface_temp_celsius ?? p.satellite_telemetry?.surface_temp_celsius ?? 31.5} °C <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span></span>
+                          <span style={{ fontWeight: 800, color: '#ffb400', fontFamily: 'var(--font-mono)', fontSize: 14 }}>
+                            {(p.satellite_observations?.surface_temp_celsius ?? p.satellite_telemetry?.surface_temp_celsius) != null
+                              ? <>{p.satellite_observations?.surface_temp_celsius ?? p.satellite_telemetry?.surface_temp_celsius} °C <span style={{ color: '#00ff9d', fontSize: 10 }}>[OPEN-METEO]</span></>
+                              : <>No data <span style={{ color: 'rgba(160,200,230,0.4)', fontSize: 10 }}>[UNAVAILABLE]</span></>}
+                          </span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-dim)' }}>Precipitation / Rainfall:</span>
-                          <span style={{ fontWeight: 800, color: (p.satellite_observations?.rainfall_intensity_mm ?? 0) > 20 ? 'var(--cyan)' : '#fff', fontFamily: 'var(--font-mono)' }}>{p.satellite_observations?.rainfall_intensity_mm ?? p.satellite_telemetry?.precipitation_mm ?? 0.0} mm/hr <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span></span>
+                          <span style={{ fontWeight: 800, color: (p.satellite_observations?.rainfall_intensity_mm ?? 0) > 20 ? 'var(--cyan)' : '#fff', fontFamily: 'var(--font-mono)' }}>
+                            {(p.satellite_observations?.rainfall_intensity_mm != null || p.satellite_telemetry?.precipitation_mm != null)
+                              ? <>{p.satellite_observations?.rainfall_intensity_mm ?? p.satellite_telemetry?.precipitation_mm} mm/hr <span style={{ color: '#00ff9d', fontSize: 10 }}>[OPEN-METEO]</span></>
+                              : <>No data <span style={{ color: 'rgba(160,200,230,0.4)', fontSize: 10 }}>[UNAVAILABLE]</span></>}
+                          </span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--text-dim)' }}>Atmospheric Wind & Pressure:</span>
-                          <span style={{ fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>{p.satellite_telemetry?.wind_speed_kmh ?? 14.0} km/h · {p.satellite_telemetry?.pressure_hpa ?? 1011.5} hPa <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span></span>
+                          <span style={{ fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>
+                            {p.satellite_telemetry?.wind_speed_kmh != null
+                              ? <>{p.satellite_telemetry.wind_speed_kmh} km/h · {p.satellite_telemetry?.pressure_hpa ?? '—'} hPa <span style={{ color: '#00ff9d', fontSize: 10 }}>[OPEN-METEO]</span></>
+                              : <>No data <span style={{ color: 'rgba(160,200,230,0.4)', fontSize: 10 }}>[UNAVAILABLE]</span></>}
+                          </span>
                         </div>
                       </div>
                     )}
@@ -1111,26 +1204,36 @@ export default function RoadModal({ road, cityId, onClose, onNavigateFrom, onNav
                       <span style={{ fontSize: 13, fontWeight: 800, color: '#ff3b6b', textTransform: 'uppercase', letterSpacing: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
                         🌋 STRUCTURAL GEODESY & HAZARD RISKS
                       </span>
-                      <span style={{ background: 'rgba(0,255,157,0.15)', border: '1px solid #00ff9d', color: '#00ff9d', padding: '2px 8px', borderRadius: '6px', fontSize: 10, fontWeight: 700 }}>[LIVE]</span>
+                      <span style={{ background: 'rgba(255,180,0,0.15)', border: '1px solid var(--yellow)', color: 'var(--yellow)', padding: '2px 8px', borderRadius: '6px', fontSize: 10, fontWeight: 700 }}>
+                        {p.satellite_observations ? '[SATELLITE]' : '[MODEL ESTIMATE]'}
+                      </span>
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 12 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span style={{ color: 'var(--text-dim)' }}>InSAR Ground Subsidence:</span>
-                        <span style={{ fontWeight: 800, color: (p.satellite_observations?.insar_subsidence_mm_yr ?? -1.8) <= -3.0 ? 'var(--red)' : '#00ff9d', fontFamily: 'var(--font-mono)', fontSize: 14 }}>
-                          {p.satellite_observations?.insar_subsidence_mm_yr ?? p.satellite_telemetry?.ground_subsidence_mm_yr ?? -1.8} mm/yr <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span>
+                        <span style={{ fontWeight: 800, color: (p.satellite_observations?.insar_subsidence_mm_yr ?? p.satellite_telemetry?.ground_subsidence_mm_yr ?? null) !== null && (p.satellite_observations?.insar_subsidence_mm_yr ?? p.satellite_telemetry?.ground_subsidence_mm_yr) <= -3.0 ? 'var(--red)' : '#00ff9d', fontFamily: 'var(--font-mono)', fontSize: 14 }}>
+                          {(p.satellite_observations?.insar_subsidence_mm_yr != null || p.satellite_telemetry?.ground_subsidence_mm_yr != null)
+                            ? <>{p.satellite_observations?.insar_subsidence_mm_yr ?? p.satellite_telemetry?.ground_subsidence_mm_yr} mm/yr <span style={{ color: '#4fc3f7', fontSize: 10 }}>[SATELLITE]</span></>
+                            : <>No InSAR data <span style={{ color: 'rgba(160,200,230,0.4)', fontSize: 10 }}>[UNAVAILABLE]</span></>}
                         </span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span style={{ color: 'var(--text-dim)' }}>Soil Moisture Index:</span>
                         <span style={{ fontWeight: 700, color: '#fff', fontFamily: 'var(--font-mono)' }}>
-                          {((p.satellite_observations?.soil_moisture_index ?? p.satellite_telemetry?.soil_moisture_0_to_7cm ?? 0.35) * 100).toFixed(1)}% Saturation <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span>
+                          {(p.satellite_observations?.soil_moisture_index != null || p.satellite_telemetry?.soil_moisture_0_to_7cm != null)
+                            ? <>{((p.satellite_observations?.soil_moisture_index ?? p.satellite_telemetry?.soil_moisture_0_to_7cm) * 100).toFixed(1)}% Saturation <span style={{ color: '#00ff9d', fontSize: 10 }}>[OPEN-METEO]</span></>
+                            : <>No data <span style={{ color: 'rgba(160,200,230,0.4)', fontSize: 10 }}>[UNAVAILABLE]</span></>}
                         </span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span style={{ color: 'var(--text-dim)' }}>Flood Hazard Indicator:</span>
                         <span style={{ fontWeight: 800, color: (p.satellite_observations?.flood_water_depth_m ?? 0) > 0 || p.damage_state === 'flooded' ? 'var(--cyan)' : 'var(--green)', fontFamily: 'var(--font-mono)' }}>
-                          {(p.satellite_observations?.flood_water_depth_m ?? 0) > 0 || p.damage_state === 'flooded' ? `⚠️ INUNDATION (${(p.satellite_observations?.flood_water_depth_m ?? 0.45).toFixed(2)}m Depth)` : '✓ Normal Surface Drainage'} <span style={{ color: '#00ff9d', fontSize: 10 }}>[LIVE]</span>
+                          {p.damage_state === 'flooded'
+                            ? <>{`⚠️ FLOODED (damage_state=flooded)`} <span style={{ color: 'var(--cyan)', fontSize: 10 }}>[MODEL]</span></>
+                            : p.satellite_observations?.flood_water_depth_m > 0
+                              ? <>{`⚠️ INUNDATION (${p.satellite_observations.flood_water_depth_m.toFixed(2)}m)`} <span style={{ color: '#4fc3f7', fontSize: 10 }}>[SATELLITE]</span></>
+                              : <>✓ No inundation detected <span style={{ color: 'rgba(160,200,230,0.4)', fontSize: 10 }}>[MODEL]</span></>}
                         </span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 8 }}>

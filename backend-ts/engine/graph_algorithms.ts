@@ -77,12 +77,14 @@ export class GraphAnalyticsEngine {
 
   /**
    * Dijkstra's Shortest Path algorithm optimized by travel time (seconds)
+   * Bounded by MAX_NODES_TO_VISIT to prevent O(n²) hang on large city graphs.
    */
   public static shortestPath(
     sourceId: string,
     targetId: string,
     nodes: Record<string, GraphNode>,
-    edges: GraphEdge[]
+    edges: GraphEdge[],
+    maxVisit: number = 5000
   ): { path: string[]; totalTravelTimeSeconds: number } {
     const adj: Map<string, Array<{ target: string; time: number; edgeId: string }>> = new Map();
     Object.keys(nodes).forEach((n) => adj.set(n, []));
@@ -104,7 +106,8 @@ export class GraphAnalyticsEngine {
     });
     dist.set(sourceId, 0);
 
-    while (unvisited.size > 0) {
+    let visited = 0;
+    while (unvisited.size > 0 && visited < maxVisit) {
       let curr: string | null = null;
       let minVal = Infinity;
       for (const node of unvisited) {
@@ -119,6 +122,7 @@ export class GraphAnalyticsEngine {
         break;
       }
       unvisited.delete(curr);
+      visited++;
 
       const neighbors = adj.get(curr) || [];
       for (const nb of neighbors) {
@@ -146,6 +150,7 @@ export class GraphAnalyticsEngine {
     };
   }
 
+
   /**
    * Calculates approximated Betweenness Centrality using k-sample shortest paths
    * to rank structural bottleneck road segments without relying on heuristic formulas.
@@ -158,15 +163,24 @@ export class GraphAnalyticsEngine {
     const betweenness = new Map<string, number>();
     edges.forEach(e => betweenness.set(e.id, 0));
 
-    // Determine number of samples (k) based on graph size to balance accuracy and latency
-    const k = Math.min(500, Math.floor(nodeKeys.length * 0.1));
+    // Build O(1) edge pair lookup: "source:target" and "target:source" -> edgeId
+    // This replaces an O(n) edges.find() with an O(1) map lookup per path step
+    const edgePairMap = new Map<string, string>();
+    edges.forEach(e => {
+      edgePairMap.set(`${e.source}:${e.target}`, e.id);
+      edgePairMap.set(`${e.target}:${e.source}`, e.id);
+    });
+
+    // Cap k much lower for large graphs — 50 samples is more than enough for a relative ranking
+    // (nodeKeys.length * 0.1 would be 19,500 for Hyderabad = still takes seconds per sample = minutes total)
+    const k = Math.min(50, Math.floor(nodeKeys.length * 0.01) + 5);
 
     for (let i = 0; i < k; i++) {
-      // Pick random source and target
-      const sIdx = Math.floor(Math.random() * nodeKeys.length);
-      let tIdx = Math.floor(Math.random() * nodeKeys.length);
-      while (tIdx === sIdx && nodeKeys.length > 1) {
-        tIdx = Math.floor(Math.random() * nodeKeys.length);
+      // Deterministic pseudo-random sampling based on primes for reproducibility
+      const sIdx = (i * 137) % nodeKeys.length;
+      let tIdx = (i * 359 + 17) % nodeKeys.length;
+      if (tIdx === sIdx && nodeKeys.length > 1) {
+        tIdx = (tIdx + 1) % nodeKeys.length;
       }
 
       const sNode = nodeKeys[sIdx]!;
@@ -175,15 +189,14 @@ export class GraphAnalyticsEngine {
       // Run shortest path based on travel time
       const { path } = GraphAnalyticsEngine.shortestPath(sNode, tNode, nodes, edges);
       
-      // Increment centrality count for edges along the path
+      // Increment centrality count for edges along the path using O(1) lookup
       if (path.length > 1) {
         for (let j = 0; j < path.length - 1; j++) {
           const u = path[j];
           const v = path[j+1];
-          // Find the edge connecting u and v
-          const edge = edges.find(e => (e.source === u && e.target === v) || (e.source === v && e.target === u));
-          if (edge) {
-            betweenness.set(edge.id, (betweenness.get(edge.id) || 0) + 1);
+          const edgeId = edgePairMap.get(`${u}:${v}`) || edgePairMap.get(`${v}:${u}`);
+          if (edgeId) {
+            betweenness.set(edgeId, (betweenness.get(edgeId) || 0) + 1);
           }
         }
       }

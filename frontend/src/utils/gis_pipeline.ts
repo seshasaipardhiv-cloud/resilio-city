@@ -266,6 +266,80 @@ export class ThreeGISRendererEngine {
     return true;
   }
 
+  public async buildBoundaryGeometryAsync(boundaryCoords: any[], centerLon: number, centerLat: number): Promise<boolean> {
+    if (this.isDisposed || !boundaryCoords) return false;
+    
+    // Extract all [lon, lat] rings recursively
+    const rings: [number, number][][] = [];
+    const extractRings = (arr: any[]) => {
+      if (!Array.isArray(arr) || arr.length === 0) return;
+      if (typeof arr[0] === 'number' && typeof arr[1] === 'number') {
+        // It's a flat [lon, lat] array, shouldn't happen at top level but just in case
+        rings.push([arr as [number, number]]);
+        return;
+      }
+      if (Array.isArray(arr[0]) && typeof arr[0][0] === 'number') {
+        // It's a ring [[lon, lat], ...]
+        rings.push(arr as [number, number][]);
+        return;
+      }
+      // It's an array of rings or an array of polygons
+      for (const item of arr) {
+        if (Array.isArray(item)) extractRings(item);
+      }
+    };
+    extractRings(boundaryCoords);
+
+    if (rings.length === 0) return false;
+    console.log(`[STAGE 6: Three.js Geometry] Generating async boundary geometry for ${rings.length} rings...`);
+
+    const positions: number[] = [];
+    const colors: number[] = [];
+    const color = new THREE.Color(0x00d4ff); // Cyan color for border
+
+    for (const ring of rings) {
+      if (ring.length < 3) continue;
+      // Connect the points in a loop
+      for (let i = 0; i < ring.length; i++) {
+        let p1 = ring[i];
+        let p2 = ring[(i + 1) % ring.length];
+        
+        if (typeof p1[0] !== 'number' || typeof p2[0] !== 'number') continue;
+
+        const x1 = (p1[0] - centerLon) * 111320 * Math.cos(centerLat * (Math.PI / 180));
+        const y1 = (p1[1] - centerLat) * 111320;
+        const x2 = (p2[0] - centerLon) * 111320 * Math.cos(centerLat * (Math.PI / 180));
+        const y2 = (p2[1] - centerLat) * 111320;
+
+        if (isValidCoord(x1) && isValidCoord(y1) && isValidCoord(x2) && isValidCoord(y2)) {
+          positions.push(x1, y1, 10); // Draw slightly above roads (z=10)
+          positions.push(x2, y2, 10);
+          colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+        }
+      }
+    }
+
+    if (positions.length === 0) return false;
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    
+    // Use a LineBasicMaterial with higher linewidth (if supported by browser) or just a brighter color
+    const material = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 3, transparent: true, opacity: 0.8 });
+    
+    const borderMesh = new THREE.LineSegments(geometry, material);
+    // Render on top
+    borderMesh.renderOrder = 999;
+    
+    this.scene.add(borderMesh);
+    // Keep reference if we want to dispose it, we can just attach it to the current scene and it will be destroyed when scene is cleared.
+    // Or store it in this.borderMesh
+    (this as any).borderMesh = borderMesh;
+
+    return true;
+  }
+
   public handleResize(width: number, height: number) {
     if (width <= 0 || height <= 0) return;
     this.camera.aspect = width / height;
@@ -292,6 +366,14 @@ export class ThreeGISRendererEngine {
         this.currentMesh.material.dispose();
       }
       this.currentMesh = null;
+    }
+    const borderMesh = (this as any).borderMesh;
+    if (borderMesh) {
+      this.scene.remove(borderMesh);
+      borderMesh.geometry.dispose();
+      if (Array.isArray(borderMesh.material)) borderMesh.material.forEach((m: any) => m.dispose());
+      else borderMesh.material.dispose();
+      (this as any).borderMesh = null;
     }
   }
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import axios from 'axios';
+import bgPetition from '../assets/bg_petition.jpg';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -41,48 +42,52 @@ export default function PetitionPage({ onBack, prefilledFromUser }: Props) {
   };
 
   const inputStyle: React.CSSProperties = {
-    width: '100%', background: 'rgba(10,20,38,0.8)',
-    border: '1px solid rgba(255,140,0,0.25)',
-    borderRadius: 10, padding: '12px 16px',
-    color: '#fff', fontFamily: 'Space Grotesk', fontSize: 14,
-    outline: 'none', transition: 'border 0.2s', boxSizing: 'border-box'
+    width: '100%', background: 'rgba(8,14,26,0.75)',
+    border: '1px solid rgba(255,160,60,0.3)',
+    borderRadius: 12, padding: '12px 16px',
+    color: '#fff', fontFamily: 'Outfit, Space Grotesk, sans-serif', fontSize: 14,
+    outline: 'none', transition: 'all 0.25s ease', boxSizing: 'border-box',
+    backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)'
   };
 
   const labelStyle: React.CSSProperties = {
     display: 'block', fontSize: 11, fontWeight: 700,
-    color: 'rgba(200,170,100,0.7)', textTransform: 'uppercase',
-    letterSpacing: 1, marginBottom: 6
+    color: '#ffb703', textTransform: 'uppercase',
+    letterSpacing: 1.2, marginBottom: 6
   };
 
   if (submitted) {
     return (
       <div style={{
         position: 'fixed', inset: 0, zIndex: 200,
-        background: 'radial-gradient(ellipse at center, rgba(20,10,2,0.99) 0%, rgba(2,3,8,0.99) 100%)',
+        background: `linear-gradient(rgba(8, 12, 22, 0.4), rgba(4, 6, 14, 0.65)), url(${bgPetition}) center/cover no-repeat fixed`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: 'Space Grotesk, sans-serif', padding: 20
+        fontFamily: 'Outfit, Space Grotesk, sans-serif', padding: 20
       }}>
         <div style={{
           maxWidth: 500, width: '100%', textAlign: 'center',
-          background: 'rgba(8,12,22,0.95)', border: '1px solid rgba(0,255,157,0.3)',
+          background: 'rgba(12, 18, 30, 0.55)',
+          backdropFilter: 'blur(30px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(30px) saturate(180%)',
+          border: '1px solid rgba(0, 255, 157, 0.4)',
           borderRadius: 24, padding: '48px 40px',
-          boxShadow: '0 0 60px rgba(0,255,100,0.1)'
+          boxShadow: '0 30px 80px rgba(0,0,0,0.6), inset 0 1px 1px rgba(255,255,255,0.2)'
         }}>
           <div style={{ fontSize: 72, marginBottom: 24 }}>✅</div>
           <div style={{ fontWeight: 900, fontSize: 26, color: '#00ff9d', marginBottom: 12 }}>Petition Submitted!</div>
-          <div style={{ fontSize: 15, color: 'rgba(180,220,180,0.8)', lineHeight: 1.6, marginBottom: 24 }}>
+          <div style={{ fontSize: 15, color: 'rgba(220,240,220,0.9)', lineHeight: 1.6, marginBottom: 24 }}>
             Your petition for <strong style={{ color: '#ffd700' }}>{cityName}</strong> has been submitted successfully.
-            Our admin team will review it and notify you at <strong style={{ color: '#ffa040' }}>{email}</strong>.
+            Our admin team will review it and notify you at <strong style={{ color: '#ffb703' }}>{email}</strong>.
           </div>
-          <div style={{ fontSize: 12, color: 'rgba(150,180,150,0.5)', marginBottom: 32, background: 'rgba(0,255,157,0.05)', border: '1px solid rgba(0,255,157,0.1)', borderRadius: 8, padding: '8px 14px' }}>
-            Petition ID: <span style={{ color: '#00ff9d', fontFamily: 'monospace' }}>{petitionId}</span>
+          <div style={{ fontSize: 12, color: 'rgba(180,220,180,0.8)', marginBottom: 32, background: 'rgba(0,255,157,0.08)', border: '1px solid rgba(0,255,157,0.2)', borderRadius: 10, padding: '10px 14px' }}>
+            Petition ID: <span style={{ color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>{petitionId}</span>
           </div>
           <button onClick={onBack} style={{
-            background: 'linear-gradient(135deg, rgba(255,140,0,0.3), rgba(255,80,0,0.2))',
-            border: '1px solid rgba(255,140,0,0.5)',
+            background: 'linear-gradient(135deg, rgba(255,140,0,0.5), rgba(255,80,0,0.4))',
+            border: '1px solid rgba(255,180,80,0.7)',
             borderRadius: 12, padding: '14px 32px', color: '#fff',
-            fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 15,
-            cursor: 'pointer', letterSpacing: 1
+            fontFamily: 'Outfit, Space Grotesk, sans-serif', fontWeight: 800, fontSize: 15,
+            cursor: 'pointer', letterSpacing: 1, boxShadow: '0 10px 30px rgba(255,100,0,0.4)'
           }}>
             ← Return to Home
           </button>
@@ -94,36 +99,32 @@ export default function PetitionPage({ onBack, prefilledFromUser }: Props) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 200,
-      background: 'radial-gradient(ellipse at center, rgba(20,10,2,0.99) 0%, rgba(2,3,8,0.99) 100%)',
+      background: `linear-gradient(rgba(10, 15, 28, 0.35), rgba(4, 8, 18, 0.6)), url(${bgPetition}) center/cover no-repeat fixed`,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'Space Grotesk, sans-serif', padding: 20,
+      fontFamily: 'Outfit, Space Grotesk, sans-serif', padding: 20,
       overflowY: 'auto'
     }}>
-      {/* Grid bg */}
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 0, opacity: 0.05,
-        backgroundImage: 'linear-gradient(rgba(255,140,0,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,140,0,0.5) 1px, transparent 1px)',
-        backgroundSize: '60px 60px', pointerEvents: 'none'
-      }} />
-
       <div style={{
         position: 'relative', zIndex: 1, width: '100%', maxWidth: 560,
-        background: 'rgba(8,12,22,0.97)',
-        border: '1px solid rgba(255,140,0,0.2)',
+        background: 'rgba(12, 18, 30, 0.48)',
+        backdropFilter: 'blur(30px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(30px) saturate(180%)',
+        border: '1px solid rgba(255, 255, 255, 0.18)',
         borderRadius: 24, overflow: 'hidden',
-        boxShadow: '0 0 80px rgba(255,100,0,0.08), 0 40px 80px rgba(0,0,0,0.6)',
+        boxShadow: '0 30px 80px rgba(0, 0, 0, 0.65), 0 0 50px rgba(255, 140, 0, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
         margin: 'auto'
       }}>
         {/* Header */}
         <div style={{
           padding: '28px 32px 20px',
-          borderBottom: '1px solid rgba(255,140,0,0.1)',
-          background: 'linear-gradient(135deg, rgba(255,140,0,0.05), rgba(255,50,0,0.02))'
+          borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+          background: 'linear-gradient(135deg, rgba(255, 180, 80, 0.12), rgba(255, 100, 50, 0.04))'
         }}>
           <button onClick={onBack} style={{
-            background: 'none', border: 'none', color: 'rgba(200,160,80,0.7)',
-            cursor: 'pointer', fontSize: 13, fontFamily: 'Space Grotesk',
-            marginBottom: 16, padding: 0, display: 'flex', alignItems: 'center', gap: 6
+            background: 'rgba(255, 255, 255, 0.08)', border: '1px solid rgba(255, 255, 255, 0.15)', color: '#ffb703',
+            cursor: 'pointer', fontSize: 13, fontFamily: 'Outfit, sans-serif', fontWeight: 600,
+            marginBottom: 16, padding: '6px 14px', borderRadius: 20, display: 'inline-flex', alignItems: 'center', gap: 6,
+            backdropFilter: 'blur(10px)', transition: 'all 0.2s ease'
           }}>← Back to Home</button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ fontSize: 36 }}>📋</div>

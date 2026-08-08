@@ -13,11 +13,16 @@ backend/venv/
 backend/env/
 backend/.venv/
 
-# ── Node / Frontend ────────────────────────────────────────────────
+# ── Node / Frontend / Backend ───────────────────────────────────────
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/*.local
+backend-ts/node_modules/
+backend-ts/dist/
+backend-ts/osm_municipal_cache/
+*.log
+
 
 # ── Environment ────────────────────────────────────────────────────
 .env

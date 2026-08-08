@@ -19,9 +19,9 @@ export class ElevationService {
     // Open-Meteo allows batches of up to 100 coordinates per request
     const batchSize = 100;
     
-    // To respect rate limits and keep response times reasonable for a real-time web request,
-    // if the graph is extremely large, we limit to 3000 nodes.
-    const maxNodesToFetch = Math.min(nodeKeys.length, 3000); 
+    // To respect rate limits and keep response times fast (< 1s),
+    // we sample up to 500 representative nodes.
+    const maxNodesToFetch = Math.min(nodeKeys.length, 500); 
     const keysToProcess = nodeKeys.slice(0, maxNodesToFetch);
 
     for (let i = 0; i < keysToProcess.length; i += batchSize) {
@@ -31,7 +31,7 @@ export class ElevationService {
 
       try {
         const url = `https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`;
-        const response = await axios.get(url, { timeout: 10000 });
+        const response = await axios.get(url, { timeout: 2000 });
         
         if (response.data && Array.isArray(response.data.elevation)) {
           const elevations = response.data.elevation;
@@ -43,14 +43,15 @@ export class ElevationService {
           });
         }
       } catch (error: any) {
-        console.warn(`[Elevation Service Warning] Failed to fetch DEM batch (${error.message}). Node elevations will remain undefined for this batch.`);
-        // Note: We do not inject fake random noise here. If data fails, it stays undefined.
+        console.warn(`[Elevation Service Notice] DEM feed unreachable or rate-limited (${error.message}). Aborting remaining elevation batches for speed.`);
+        // Fast-fail: break immediately if rate limited or unreachable to prevent multi-minute stalls
+        break;
       }
       
       // Small delay to respect public API rate limits
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
     
-    console.log(`[Elevation Service] DEM attachment complete. Processed ${maxNodesToFetch} nodes.`);
+    console.log(`[Elevation Service] DEM attachment complete.`);
   }
 }

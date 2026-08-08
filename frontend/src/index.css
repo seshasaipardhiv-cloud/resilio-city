@@ -569,3 +569,11 @@ select option { background: #080d18; color: var(--text); }
 .animate-pop {
   animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
 }
+
+@keyframes loadProgress {
+  0% { transform: scaleX(0); }
+  15% { transform: scaleX(0.4); }
+  50% { transform: scaleX(0.7); }
+  100% { transform: scaleX(0.95); }
+}
+

@@ -93,10 +93,17 @@ export class MunicipalBoundaryClipper {
       candidateQueries.push('Hyderabad, Telangana, India', 'Greater Hyderabad Municipal Corporation, India');
     } else if (cityId === 'cyber_bangalore') {
       candidateQueries.push('Bengaluru, Karnataka, India', 'Bruhat Bengaluru Mahanagara Palike, India');
+    } else if (cityId === 'coimbatore') {
+      candidateQueries.push(
+        'Coimbatore, Tamil Nadu, India',
+        'Coimbatore City, India',
+        'Coimbatore District, India'
+      );
     } else {
       candidateQueries.push(
-        `${cleanName}, ${stateName}, India`,
+        `${cleanName} Corporation, India`,
         `${cleanName} Municipal Corporation, India`,
+        `${cleanName}, ${stateName}, India`,
         `${cleanName} District, India`,
         `${cleanName}, India`
       );
@@ -148,11 +155,11 @@ export class MunicipalBoundaryClipper {
     stateName: string,
     nodes: Record<string, GraphNode>,
     edges: GraphEdge[]
-  ): Promise<{ nodes: Record<string, GraphNode>; edges: GraphEdge[] }> {
+  ): Promise<{ nodes: Record<string, GraphNode>; edges: GraphEdge[]; polygon: any }> {
     const startTs = Date.now();
     const geometry = await this.fetchMunicipalPolygon(cityId, muniName, stateName);
     if (!geometry) {
-      return { nodes, edges }; // Return unmodified network if polygon lookup fails
+      return { nodes, edges, polygon: null }; // Return unmodified network if polygon lookup fails
     }
 
     const origEdgeCount = edges.length;
@@ -202,11 +209,12 @@ export class MunicipalBoundaryClipper {
     console.log(`[Geospatial Boundary Clipper] Precise municipal shape polygon clipping applied for ${muniName} in ${duration}ms. Retained ${clippedEdges.length}/${origEdgeCount} authentic roads within exact administrative borders (removed ${origEdgeCount - clippedEdges.length} out-of-bounds rectangular box segments).`);
 
     // Safety guard: if clipping removed almost everything due to coordinate mismatches, fallback to bounding box
-    if (clippedEdges.length < origEdgeCount * 0.1 && origEdgeCount > 100) {
-      console.warn(`[Geospatial Boundary Clipper] Alert: polygon clipping retained <10% of roads for ${muniName}; reverting to full regional bounds to prevent data loss.`);
-      return { nodes, edges };
+    // But trust the polygon if it retains at least a reasonable number of roads (e.g. 500)
+    if (clippedEdges.length < 500 && origEdgeCount > 1000) {
+      console.warn(`[Geospatial Boundary Clipper] Alert: polygon clipping retained <500 roads for ${muniName}; reverting to full regional bounds to prevent data loss.`);
+      return { nodes, edges, polygon: geometry };
     }
 
-    return { nodes: clippedNodes, edges: clippedEdges };
+    return { nodes: clippedNodes, edges: clippedEdges, polygon: geometry };
   }
 }

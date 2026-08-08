@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
-import bgRoad from '../assets/bg_road.jpg';
+import bgLandingAutumn from '../assets/bg_landing_autumn.jpg';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -105,13 +105,13 @@ const DEFAULT_CITY_NETWORKS: CityCard[] = [
 ];
 
 export default function Landing({ onSelectCity }: Props) {
-  const [cities, setCities]             = useState<CityCard[]>(DEFAULT_CITY_NETWORKS);
-  const [loading, setLoading]           = useState(false);
-  const [loadingCity, setLoadingCity]   = useState<string | null>(null);
+  const [cities, setCities] = useState<CityCard[]>(DEFAULT_CITY_NETWORKS);
+  const [loading, setLoading] = useState(false);
+  const [loadingCity, setLoadingCity] = useState<string | null>(null);
   const [loadingStage, setLoadingStage] = useState('');
-  const [error, setError]               = useState('');
-  const [hoveredCity, setHoveredCity]   = useState<string | null>(null);
-  const [searchQuery, setSearchQuery]   = useState('');
+  const [error, setError] = useState('');
+  const [hoveredCity, setHoveredCity] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     axios.get(`${API}/cities`)
@@ -171,10 +171,10 @@ export default function Landing({ onSelectCity }: Props) {
   const healthBadge = (rci: number): [string, string] =>
     rci >= 75 ? ['GOOD', '#00ff9d'] : rci >= 55 ? ['FAIR', '#ffd200'] : rci >= 35 ? ['POOR', '#ff8c00'] : ['CRITICAL', '#ff2850'];
 
-  const totalRoads   = cities.reduce((a, c) => a + c.total_roads, 0);
-  const totalCrit    = cities.reduce((a, c) => a + c.critical_roads, 0);
-  const totalPop     = cities.reduce((a, c) => a + c.population_covered, 0);
-  const avgRci       = cities.length ? cities.reduce((a, c) => a + c.avg_rci, 0) / cities.length : 0;
+  const totalRoads = cities.reduce((a, c) => a + c.total_roads, 0);
+  const totalCrit = cities.reduce((a, c) => a + c.critical_roads, 0);
+  const totalPop = cities.reduce((a, c) => a + c.population_covered, 0);
+  const avgRci = cities.length ? cities.reduce((a, c) => a + c.avg_rci, 0) / cities.length : 0;
   const loadingCityObj = cities.find(c => c.id === loadingCity);
 
   // Deduplicate cities by id to prevent React key warnings
@@ -184,13 +184,13 @@ export default function Landing({ onSelectCity }: Props) {
     <div style={{
       position: 'relative', zIndex: 2, width: '100vw', height: '100vh',
       display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      backgroundImage: `url(${bgRoad})`,
-      backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed',
+      backgroundImage: `url(${bgLandingAutumn})`,
+      backgroundSize: 'cover', backgroundPosition: 'center center', backgroundAttachment: 'fixed',
     }}>
-      {/* Dark overlay */}
+      {/* Dark gradient overlay to enhance readability while showing autumn trees */}
       <div style={{
         position: 'absolute', inset: 0, zIndex: 0,
-        background: 'linear-gradient(180deg, rgba(3,6,16,0.9) 0%, rgba(5,10,22,0.88) 40%, rgba(3,6,16,0.97) 100%)',
+        background: 'linear-gradient(180deg, rgba(6, 10, 20, 0.72) 0%, rgba(8, 14, 26, 0.5) 45%, rgba(4, 8, 18, 0.78) 100%)',
       }} />
 
       {/* ── CITY LOADING OVERLAY ── */}
@@ -208,10 +208,24 @@ export default function Landing({ onSelectCity }: Props) {
             <div style={{ fontSize: 13, color: 'rgba(160,200,230,0.5)', marginBottom: 28, letterSpacing: 1 }}>{loadingCityObj?.subtitle}</div>
           </div>
           <div style={{ fontSize: 13, color: 'rgba(0,212,255,0.8)', fontFamily: 'Space Grotesk', fontWeight: 700, marginBottom: 18, letterSpacing: 1 }}>{loadingStage}</div>
+
+          {/* Animated Loading Bar */}
+          <div style={{ width: '250px', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', overflow: 'hidden', marginBottom: '16px', position: 'relative' }}>
+            <div style={{
+              position: 'absolute', top: 0, left: 0, bottom: 0,
+              background: loadingCityObj?.theme ?? '#00d4ff',
+              animation: 'fillProgress 60s cubic-bezier(0.1, 0.7, 1, 0.1) forwards'
+            }} />
+          </div>
+
+          <div style={{ fontSize: 12, color: 'rgba(0, 255, 255, 0.8)', fontStyle: 'italic', marginBottom: '24px', maxWidth: '300px', textAlign: 'center' }}>
+            This is taking longer than usual.
+          </div>
+
           <div style={{ display: 'flex', gap: 10 }}>
             {['Engine', 'Roads', 'Analysis', 'Render'].map(s => {
               const stages = ['engine', 'road', 'analys', 'render'];
-              const active = loadingStage.toLowerCase().includes(stages[['Engine','Roads','Analysis','Render'].indexOf(s)]);
+              const active = loadingStage.toLowerCase().includes(stages[['Engine', 'Roads', 'Analysis', 'Render'].indexOf(s)]);
               return (
                 <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: active ? (loadingCityObj?.theme ?? '#00d4ff') : 'rgba(160,200,230,0.2)' }}>
                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: active ? (loadingCityObj?.theme ?? '#00d4ff') : 'rgba(160,200,230,0.15)', boxShadow: active ? `0 0 10px ${loadingCityObj?.theme ?? '#00d4ff'}` : 'none', transition: 'all 0.3s' }} />
@@ -220,6 +234,13 @@ export default function Landing({ onSelectCity }: Props) {
               );
             })}
           </div>
+          <style>{`
+            @keyframes fillProgress {
+              0% { width: 0%; }
+              50% { width: 70%; }
+              100% { width: 95%; }
+            }
+          `}</style>
         </div>
       )}
 
@@ -257,10 +278,10 @@ export default function Landing({ onSelectCity }: Props) {
         <div style={{ padding: '12px 36px', display: 'flex', flexWrap: 'wrap', gap: 12, borderBottom: '1px solid rgba(0,212,255,0.1)', background: 'rgba(5,10,24,0.5)', backdropFilter: 'blur(10px)', flexShrink: 0 }}>
           {[
             { label: 'Roads Monitored', val: totalRoads.toLocaleString(), color: '#00d4ff', icon: '🛣️' },
-            { label: 'Avg RCI Score',   val: avgRci.toFixed(1) + '%',     color: rciColor(avgRci), icon: '📊' },
-            { label: 'Critical Alerts', val: totalCrit,                   color: '#ff2850', icon: '🚨' },
-            { label: 'Population',      val: (totalPop / 1e6).toFixed(1) + 'M', color: '#bd93f9', icon: '👥' },
-            { label: 'Cities',          val: uniqueCities.length,         color: '#ffd200', icon: '📍' },
+            { label: 'Avg RCI Score', val: avgRci.toFixed(1) + '%', color: rciColor(avgRci), icon: '📊' },
+            { label: 'Critical Alerts', val: totalCrit, color: '#ff2850', icon: '🚨' },
+            { label: 'Population', val: (totalPop / 1e6).toFixed(1) + 'M', color: '#bd93f9', icon: '👥' },
+            { label: 'Cities', val: uniqueCities.length, color: '#ffd200', icon: '📍' },
           ].map(s => (
             <div key={s.label} style={{ flex: '1 1 160px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '10px 16px', position: 'relative', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, transparent, ${s.color}70, transparent)` }} />
@@ -335,99 +356,99 @@ export default function Landing({ onSelectCity }: Props) {
               <div style={{ fontWeight: 700, color: '#ff3b6b', marginBottom: 10, fontSize: 16 }}>{error}</div>
             </div>
           ) : uniqueCities
-              .filter(c => {
-                if (!searchQuery.trim()) return true;
-                const q = searchQuery.toLowerCase();
-                return c.name.toLowerCase().includes(q) || c.subtitle.toLowerCase().includes(q) || c.id.toLowerCase().includes(q);
-              })
-              .map(city => {
-            const [healthText, healthColor] = healthBadge(city.avg_rci);
-            const isLoading = loadingCity === city.id;
-            const isHovered = hoveredCity === city.id;
-            const rciFill = Math.min(100, city.avg_rci);
-            return (
-              <div
-                key={city.id}
-                className="animate-pop glass-panel"
-                onClick={() => !loadingCity && handleSelect(city)}
-                onMouseEnter={() => setHoveredCity(city.id)}
-                onMouseLeave={() => setHoveredCity(null)}
-                style={{
-                  cursor: loadingCity ? 'default' : 'pointer',
-                  transition: 'all 0.25s cubic-bezier(0.34,1.2,0.64,1)',
-                  transform: isHovered && !isLoading ? 'translateY(-2px)' : 'translateY(0)',
-                  position: 'relative', overflow: 'hidden',
-                  display: 'flex', flexDirection: 'column', gap: 10,
-                  borderRadius: 14, padding: '14px 16px',
-                }}
-              >
-                {/* Top accent */}
-                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, transparent, ${city.theme}, transparent)`, opacity: isHovered || isLoading ? 1 : 0.5, transition: 'opacity 0.3s' }} />
-
-                {/* Row 1: emoji + name + health badge */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 38, height: 38, borderRadius: 10, background: `${city.theme}18`, border: `1px solid ${city.theme}45`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
-                    {city.emoji}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 16, color: city.theme, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: `0 0 10px ${city.theme}50` }}>
-                      {city.name}
-                    </div>
-                    <div style={{ fontSize: 10, color: 'rgba(160,200,230,0.5)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{city.subtitle}</div>
-                  </div>
-                  <div style={{ background: `${healthColor as string}18`, border: `1px solid ${healthColor as string}50`, color: healthColor as string, borderRadius: 8, padding: '3px 10px', fontSize: 10, fontWeight: 800, letterSpacing: 1, flexShrink: 0 }}>
-                    {healthText}
-                  </div>
-                </div>
-
-                {/* Row 2: RCI bar + stats inline */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                    <span style={{ fontSize: 10, color: 'rgba(160,200,230,0.5)', fontWeight: 700, letterSpacing: 0.5 }}>RCI SCORE</span>
-                    <span style={{ fontSize: 10, fontWeight: 900, color: rciColor(city.avg_rci), fontFamily: 'Space Grotesk' }}>{city.avg_rci}%</span>
-                  </div>
-                  {/* 5-tier color bar */}
-                  <div style={{ height: 5, background: 'rgba(255,255,255,0.07)', borderRadius: 4, overflow: 'hidden', marginBottom: 8 }}>
-                    <div style={{ width: `${rciFill}%`, height: '100%', background: `linear-gradient(90deg, #ff2850, #ff8c00 40%, #ffd200 70%, #00ff9d 100%)`, backgroundSize: '200% 100%', backgroundPositionX: `${100 - rciFill}%`, borderRadius: 4, boxShadow: `0 0 8px ${rciColor(city.avg_rci)}60`, transition: 'width 1s ease' }} />
-                  </div>
-                  {/* Inline stats */}
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {[
-                      { l: 'Roads', v: city.total_roads.toLocaleString(), c: '#00d4ff' },
-                      { l: 'Critical', v: city.critical_roads, c: city.critical_roads > 30 ? '#ff2850' : '#ffd200' },
-                      { l: 'Budget', v: `${city.budget_utilized_pct}%`, c: '#00ff9d' },
-                    ].map(item => (
-                      <div key={item.l} style={{ flex: 1, background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', textAlign: 'center' }}>
-                        <div style={{ fontSize: 9, color: 'rgba(160,200,230,0.45)', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>{item.l}</div>
-                        <div style={{ fontSize: 13, fontWeight: 900, fontFamily: 'Space Grotesk', color: item.c }}>{item.v}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Enter button */}
-                <button
-                  onClick={e => { e.stopPropagation(); if (!loadingCity) handleSelect(city); }}
-                  disabled={!!loadingCity}
+            .filter(c => {
+              if (!searchQuery.trim()) return true;
+              const q = searchQuery.toLowerCase();
+              return c.name.toLowerCase().includes(q) || c.subtitle.toLowerCase().includes(q) || c.id.toLowerCase().includes(q);
+            })
+            .map(city => {
+              const [healthText, healthColor] = healthBadge(city.avg_rci);
+              const isLoading = loadingCity === city.id;
+              const isHovered = hoveredCity === city.id;
+              const rciFill = Math.min(100, city.avg_rci);
+              return (
+                <div
+                  key={city.id}
+                  className="animate-pop glass-panel"
+                  onClick={() => !loadingCity && handleSelect(city)}
+                  onMouseEnter={() => setHoveredCity(city.id)}
+                  onMouseLeave={() => setHoveredCity(null)}
                   style={{
-                    width: '100%', padding: '10px 0',
-                    background: isLoading ? `${city.theme}25` : `linear-gradient(135deg, ${city.theme}28 0%, ${city.theme}12 100%)`,
-                    border: `1px solid ${city.theme}${isHovered || isLoading ? '80' : '40'}`,
-                    color: '#ffffff', borderRadius: 10, fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 13,
-                    cursor: loadingCity ? 'not-allowed' : 'pointer', transition: 'all 0.25s',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    boxShadow: isHovered && !loadingCity ? `0 4px 18px ${city.theme}35` : 'none',
-                    textShadow: '0 1px 3px rgba(0,0,0,0.6)'
+                    cursor: loadingCity ? 'default' : 'pointer',
+                    transition: 'all 0.25s cubic-bezier(0.34,1.2,0.64,1)',
+                    transform: isHovered && !isLoading ? 'translateY(-2px)' : 'translateY(0)',
+                    position: 'relative', overflow: 'hidden',
+                    display: 'flex', flexDirection: 'column', gap: 10,
+                    borderRadius: 14, padding: '14px 16px',
                   }}
                 >
-                  {isLoading
-                    ? <><div className="spinner" style={{ borderTopColor: '#ffffff', width: 14, height: 14 }} /> Ingesting Digital Twin...</>
-                    : <><span>▶</span> ENTER {city.name.toUpperCase()}</>
-                  }
-                </button>
-              </div>
-            );
-          })}
+                  {/* Top accent */}
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, transparent, ${city.theme}, transparent)`, opacity: isHovered || isLoading ? 1 : 0.5, transition: 'opacity 0.3s' }} />
+
+                  {/* Row 1: emoji + name + health badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 10, background: `${city.theme}18`, border: `1px solid ${city.theme}45`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                      {city.emoji}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 16, color: city.theme, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: `0 0 10px ${city.theme}50` }}>
+                        {city.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'rgba(160,200,230,0.5)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{city.subtitle}</div>
+                    </div>
+                    <div style={{ background: `${healthColor as string}18`, border: `1px solid ${healthColor as string}50`, color: healthColor as string, borderRadius: 8, padding: '3px 10px', fontSize: 10, fontWeight: 800, letterSpacing: 1, flexShrink: 0 }}>
+                      {healthText}
+                    </div>
+                  </div>
+
+                  {/* Row 2: RCI bar + stats inline */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                      <span style={{ fontSize: 10, color: 'rgba(160,200,230,0.5)', fontWeight: 700, letterSpacing: 0.5 }}>RCI SCORE</span>
+                      <span style={{ fontSize: 10, fontWeight: 900, color: rciColor(city.avg_rci), fontFamily: 'Space Grotesk' }}>{city.avg_rci}%</span>
+                    </div>
+                    {/* 5-tier color bar */}
+                    <div style={{ height: 5, background: 'rgba(255,255,255,0.07)', borderRadius: 4, overflow: 'hidden', marginBottom: 8 }}>
+                      <div style={{ width: `${rciFill}%`, height: '100%', background: `linear-gradient(90deg, #ff2850, #ff8c00 40%, #ffd200 70%, #00ff9d 100%)`, backgroundSize: '200% 100%', backgroundPositionX: `${100 - rciFill}%`, borderRadius: 4, boxShadow: `0 0 8px ${rciColor(city.avg_rci)}60`, transition: 'width 1s ease' }} />
+                    </div>
+                    {/* Inline stats */}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {[
+                        { l: 'Roads', v: city.total_roads.toLocaleString(), c: '#00d4ff' },
+                        { l: 'Critical', v: city.critical_roads, c: city.critical_roads > 30 ? '#ff2850' : '#ffd200' },
+                        { l: 'Budget', v: `${city.budget_utilized_pct}%`, c: '#00ff9d' },
+                      ].map(item => (
+                        <div key={item.l} style={{ flex: 1, background: 'rgba(255,255,255,0.03)', borderRadius: 8, padding: '6px 8px', border: '1px solid rgba(255,255,255,0.06)', textAlign: 'center' }}>
+                          <div style={{ fontSize: 9, color: 'rgba(160,200,230,0.45)', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>{item.l}</div>
+                          <div style={{ fontSize: 13, fontWeight: 900, fontFamily: 'Space Grotesk', color: item.c }}>{item.v}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Enter button */}
+                  <button
+                    onClick={e => { e.stopPropagation(); if (!loadingCity) handleSelect(city); }}
+                    disabled={!!loadingCity}
+                    style={{
+                      width: '100%', padding: '10px 0',
+                      background: isLoading ? `${city.theme}25` : `linear-gradient(135deg, ${city.theme}28 0%, ${city.theme}12 100%)`,
+                      border: `1px solid ${city.theme}${isHovered || isLoading ? '80' : '40'}`,
+                      color: '#ffffff', borderRadius: 10, fontFamily: 'Space Grotesk', fontWeight: 800, fontSize: 13,
+                      cursor: loadingCity ? 'not-allowed' : 'pointer', transition: 'all 0.25s',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      boxShadow: isHovered && !loadingCity ? `0 4px 18px ${city.theme}35` : 'none',
+                      textShadow: '0 1px 3px rgba(0,0,0,0.6)'
+                    }}
+                  >
+                    {isLoading
+                      ? <><div className="spinner" style={{ borderTopColor: '#ffffff', width: 14, height: 14 }} /> Ingesting Digital Twin...</>
+                      : <><span>▶</span> ENTER {city.name.toUpperCase()}</>
+                    }
+                  </button>
+                </div>
+              );
+            })}
         </div>
 
         {/* ── FOOTER ── */}
