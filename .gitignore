@@ -38,6 +38,5 @@ backend-ts/osm_municipal_cache/
 # ── OS ─────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-desktop.ini
 hackathon-city-resilience/
-
+scratch/

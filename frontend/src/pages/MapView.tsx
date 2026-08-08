@@ -266,13 +266,40 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       console.log(`[STAGE 2: API Request] Fetching network geometry from backend for ${cityId}...`);
       setLoadMsg('Downloading road network...');
 
-      // Load city model into backend memory. Increased timeout to 180s for large OSM municipal graphs.
+      // 1. Load city model into backend memory with explicit error verification
       try {
         await axios.get(`${API}/city/${cityId}/load`, { timeout: 180000 });
-      } catch (e: any) {
-        console.warn(`[STAGE 2 Notice] /city/${cityId}/load notice: ${e?.message || e}`);
+      } catch (loadErr: any) {
+        const status = loadErr?.response?.status;
+        const detail = loadErr?.response?.data?.detail || loadErr?.message || 'Network request failed';
+        console.error(`[STAGE 2 Error] /city/${cityId}/load failed [Status: ${status}]:`, detail);
+
+        let diagCode = 'API_ROUTE_FAILED';
+        let userMsg = 'No map data available.';
+
+        if (!loadErr?.response) {
+          if (loadErr?.code === 'ECONNABORTED' || loadErr?.message?.includes('timeout')) {
+            diagCode = 'TIMEOUT';
+            userMsg = 'OpenStreetMap ingestion timed out.';
+          } else {
+            diagCode = 'API_UNREACHABLE';
+            userMsg = 'API server is unreachable.';
+          }
+        } else if (status === 500 && (detail.includes('DATA UNAVAILABLE') || detail.includes('Overpass'))) {
+          diagCode = 'OSM_SERVICE_FAILED';
+          userMsg = 'OpenStreetMap Overpass servers temporarily unavailable.';
+        } else if (status === 404) {
+          diagCode = 'BOUNDARY_FAILED';
+          userMsg = `Municipal boundary definition not found for '${cityName}'.`;
+        }
+
+        setMapError(`${userMsg} [Diagnostic: ${diagCode}]`);
+        showToast(`⚠ ${userMsg} (${diagCode})`, 'error');
+        setLoading(false);
+        return;
       }
 
+      // 2. Retrieve validated GeoJSON FeatureCollection
       const geo = await axios.get(`${API}/city`, { timeout: 180000 });
       console.log(`[STAGE 3: Backend Response] Received data payload. Status: ${geo.status}, Features Count: ${geo.data?.features?.length ?? 0}`);
 
@@ -283,17 +310,19 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
       const validated = await validateAndProcessGISGraph(rawFeatures, cityId);
 
       if (!validated.isValid || validated.validRoads.length === 0) {
-        console.error('[STAGE 5 Error] Geometry validation failed or returned 0 valid roads.');
-        setMapError('Unable to load city data.'); // STEP 6
+        const diagCode = validated.errorDetail ? 'INVALID_GEOJSON' : 'NO_VALID_GEOMETRY';
+        console.error(`[STAGE 5 Error] Geometry validation failed: ${validated.errorDetail || '0 valid roads'}`);
+        setMapError(`No map data available. [Diagnostic: ${diagCode}]`);
+        showToast(`⚠ Geometry validation failed (${diagCode})`, 'error');
         setLoading(false);
         return;
       }
 
       setLoadMsg('Rendering map...');
-      // Pass strictly verified roads to DeckGL to prevent WebGL shader crashes (Black screen solution)
+      // Pass strictly verified roads to DeckGL to prevent WebGL shader crashes
       setGeoData({ ...geo.data, features: validated.validRoads });
 
-      // STEP 4 & 10: Compute Bounds & automatically call fitBounds(), center camera, never leave at (0,0,0)
+      // STEP 4 & 10: Compute Bounds & automatically call fitBounds(), center camera
       const bounds = fitBounds(validated.minLon, validated.minLat, validated.maxLon, validated.maxLat, window.innerWidth, window.innerHeight);
       setViewState(v => ({
         ...v,
@@ -305,7 +334,7 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
         transitionDuration: 1800
       } as any));
 
-      // Initialize Three.js Safety & Production Lighting Engine (STEP 9, 11, 14)
+      // Initialize Three.js Safety & Production Lighting Engine
       if (!threeEngineRef.current) {
         threeEngineRef.current = new ThreeGISRendererEngine(window.innerWidth, window.innerHeight);
         if (threeCanvasRef.current) {
@@ -365,8 +394,14 @@ export default function MapView({ cityId, cityName, onBack }: Props) {
 
     } catch (err: any) {
       console.error('[STAGE 2 Error] Failed to load or render network data:', err);
-      setMapError('No map data available.'); // STEP 13
-      showToast('⚠ Loading failed. Is the API server reachable?', 'error');
+      let diagCode = 'API_ROUTE_FAILED';
+      if (!err?.response) {
+        diagCode = (err?.code === 'ECONNABORTED' || err?.message?.includes('timeout')) ? 'TIMEOUT' : 'API_UNREACHABLE';
+      } else if (err?.response?.status === 400 && err?.response?.data?.detail === 'No city loaded.') {
+        diagCode = 'OSM_SERVICE_FAILED';
+      }
+      setMapError(`No map data available. [Diagnostic: ${diagCode}]`);
+      showToast(`⚠ Loading failed (${diagCode})`, 'error');
     } finally {
       setLoading(false);
     }

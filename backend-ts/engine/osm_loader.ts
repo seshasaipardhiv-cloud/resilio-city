@@ -22,7 +22,9 @@ export class OsmLoaderEngine {
   private static readonly CACHE_DIR = path.join(process.cwd(), 'osm_municipal_cache');
   private static readonly OVERPASS_MIRRORS = [
     'https://overpass-api.de/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter',
+    'https://lz4.overpass-api.de/api/interpreter',
+    'https://z.overpass-api.de/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
     'https://overpass.osm.ch/api/interpreter'
   ];
 
@@ -71,17 +73,13 @@ export class OsmLoaderEngine {
     }
 
 
-    // 2. If no local cache exists, perform Overpass API query
+    // 2. If no local cache exists, perform high-performance indexed Overpass API query
     if (rawElements.length === 0) {
-      // Expand BBOX massively (+0.1 deg ~ 11km) to ensure 100% of municipal boundary shape is covered.
-      // MunicipalBoundaryClipper will flawlessly trim this excess area in 0.17 seconds.
       const [south, west, north, east] = muni.bbox;
-      // Add a slight padding to the BBOX to ensure we fetch all boundary edge nodes
-      const bboxStr = `${(south - 0.05).toFixed(4)},${(west - 0.05).toFixed(4)},${(north + 0.05).toFixed(4)},${(east + 0.05).toFixed(4)}`;
+      const bboxStr = `${south.toFixed(4)},${west.toFixed(4)},${north.toFixed(4)},${east.toFixed(4)}`;
+      const filter = `(${bboxStr})`;
 
-      let filter = `(${bboxStr})`;
-
-      // High-speed Overpass query using R-tree spatial index (1-3s response time)
+      // High-speed Overpass query using R-tree spatial B-tree index
       const overpassQuery = `
 [out:json][timeout:60];
 (
@@ -100,28 +98,11 @@ export class OsmLoaderEngine {
   way["highway"="service"]${filter};
   way["highway"="unclassified"]${filter};
   way["highway"="road"]${filter};
-  way["highway"="pedestrian"]${filter};
-  way["highway"="footway"]${filter};
-  way["highway"="path"]${filter};
-  way["highway"="cycleway"]${filter};
-  way["highway"="track"]${filter};
-  way["highway"="steps"]${filter};
   node["highway"="traffic_signals"]${filter};
-  node["highway"="crossing"]${filter};
   node["junction"="roundabout"]${filter};
   node["amenity"="hospital"]${filter};
-  node["amenity"="clinic"]${filter};
-  node["amenity"="doctors"]${filter};
-  node["amenity"="pharmacy"]${filter};
-  node["amenity"="nursing_home"]${filter};
   node["amenity"="fire_station"]${filter};
   node["amenity"="police"]${filter};
-  node["healthcare"]${filter};
-  way["amenity"="hospital"]${filter};
-  way["amenity"="clinic"]${filter};
-  way["amenity"="fire_station"]${filter};
-  way["amenity"="police"]${filter};
-  way["healthcare"]${filter};
   way["waterway"="river"]${filter};
   way["waterway"="stream"]${filter};
 );
@@ -132,13 +113,13 @@ out skel qt;`.trim();
       for (const mirror of OsmLoaderEngine.OVERPASS_MIRRORS) {
         let retries = 2;
         while (retries > 0 && rawElements.length === 0) {
-          console.log(`[OSM Overpass API] Fetching complete authentic street network for ${muni.name} via ${mirror} (${retries} retries left)...`);
+          console.log(`[OSM Overpass API] Fetching authentic street network for ${muni.name} via ${mirror} (${retries} retries left)...`);
           try {
-            const res = await axios.get(mirror, {
-              params: { data: overpassQuery },
+            const res = await axios.post(mirror, `data=${encodeURIComponent(overpassQuery)}`, {
               headers: {
-                'User-Agent': 'curl/7.68.0',
-                'Accept': '*/*'
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'User-Agent': 'ResilioCityAI-ResiliencePlatform/2.0 (https://resilio-city.onrender.com; osm-research)',
+                'Accept': 'application/json'
               },
               timeout: 90000
             });
@@ -146,16 +127,20 @@ out skel qt;`.trim();
             if (res.data && Array.isArray(res.data.elements) && res.data.elements.length > 200) {
               rawElements = res.data.elements;
               console.log(`[OSM Overpass API] Successfully fetched ${rawElements.length} real OSM municipal elements from ${mirror}.`);
-              fs.writeFileSync(localFile, JSON.stringify(res.data), 'utf-8');
+              try {
+                fs.writeFileSync(localFile, JSON.stringify(res.data), 'utf-8');
+              } catch (writeErr: any) {
+                console.warn(`[OSM Overpass API] Cache write notice for ${cityId}: ${writeErr.message}`);
+              }
               break;
             }
           } catch (mirrorErr: any) {
             retries--;
             console.warn(`[OSM Overpass API] Mirror ${mirror} notice for ${cityId}: ${mirrorErr.message}`);
             if (mirrorErr.response && (mirrorErr.response.status === 429 || mirrorErr.response.status === 504)) {
-              await sleep(5000);
+              await sleep(4000);
             } else {
-              await sleep(2000);
+              await sleep(1500);
             }
           }
         }
